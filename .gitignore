@@ -15,11 +15,11 @@ images/
 
 test*.md
 
-md2kms
+md2kms*
 
 .vscode/
 
-.DS_Store/
+**/.DS_Store/
 
 .idea/
 

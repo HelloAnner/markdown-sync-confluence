@@ -145,8 +145,16 @@ class MarkdownToConfluence:
                         content_type=self._get_image_content_type(abs_image_path),
                         page_id=self.current_page_id
                     )
-                    # 构建图片URL
-                    image_url = f"{self.config['confluence']['url']}/download/attachments/{self.current_page_id}/{filename}"
+                    # 使用 API 返回的图片信息
+                    if attachment and '_links' in attachment:
+                        image_url = attachment['_links'].get('download', '')
+                        if image_url:
+                            # 如果返回的是相对路径，添加基础 URL
+                            if not image_url.startswith(('http://', 'https://')):
+                                image_url = f"{self.config['confluence']['url']}{image_url}"
+                    else:
+                        print(f"警告: 无法获取图片 {filename} 的链接信息")
+                        return None
                 except Exception as e:
                     print(f"警告: 上传图片到现有页面失败: {str(e)}")
                     return None
@@ -172,8 +180,16 @@ class MarkdownToConfluence:
                         content_type=self._get_image_content_type(abs_image_path),
                         page_id=temp_page['id']
                     )
-                    # 构建图片URL
-                    image_url = f"{self.config['confluence']['url']}/download/attachments/{temp_page['id']}/{filename}"
+                    # 使用 API 返回的图片信息
+                    if attachment and '_links' in attachment:
+                        image_url = attachment['_links'].get('download', '')
+                        if image_url:
+                            # 如果返回的是相对路径，添加基础 URL
+                            if not image_url.startswith(('http://', 'https://')):
+                                image_url = f"{self.config['confluence']['url']}{image_url}"
+                    else:
+                        print(f"警告: 无法获取图片 {filename} 的链接信息")
+                        return None
 
                     # 缓存上传的图片URL
                     if image_url:
@@ -231,8 +247,21 @@ class MarkdownToConfluence:
         """处理Markdown中的图片，上传并替换URL"""
         def process_image_path(image_path):
             """处理图片路径，支持相对路径和 attachments 目录"""
-            # 如果是网络图片，直接返回
+            # 如果是网络图片
             if image_path.startswith(('http://', 'https://')):
+                # 如果是 Confluence 内部图片
+                if '/download/attachments/' in image_path or '/pages/viewpage.action' in image_path:
+                    # 如果是预览链接，需要提取实际的图片路径
+                    if '/pages/viewpage.action' in image_path:
+                        # 从预览 URL 中提取图片名称
+                        preview_path = image_path.split('preview=/')[-1] if 'preview=/' in image_path else None
+                        if preview_path:
+                            page_id = preview_path.split('/')[0]
+                            image_name = preview_path.split('/')[-1]
+                            # 构造下载链接
+                            image_path = f"{self.config['confluence']['url']}/download/attachments/{page_id}/{image_name}"
+                    return image_path
+                # 其他外部图片
                 return image_path
                 
             # 处理 Obsidian 的 attachments 路径
@@ -280,8 +309,21 @@ class MarkdownToConfluence:
             alt_text = match.group(1)
             image_path = match.group(2)
             
-            # 如果是网络图片，直接使用
+            # 如果是网络图片
             if image_path.startswith(('http://', 'https://')):
+                # 如果是 Confluence 内部图片
+                if '/download/attachments/' in image_path or '/pages/viewpage.action' in image_path:
+                    # 如果是预览链接，需要提取实际的图片路径
+                    if '/pages/viewpage.action' in image_path:
+                        # 从预览 URL 中提取图片名称
+                        preview_path = image_path.split('preview=/')[-1] if 'preview=/' in image_path else None
+                        if preview_path:
+                            page_id = preview_path.split('/')[0]
+                            image_name = preview_path.split('/')[-1]
+                            # 构造下载链接
+                            image_path = f"{self.config['confluence']['url']}/download/attachments/{page_id}/{image_name}"
+                    return f'<ac:image><ri:url ri:value="{image_path}"/></ac:image>'
+                # 其他外部图片
                 return f'<ac:image><ri:url ri:value="{image_path}"/></ac:image>'
             
             # 处理本地图片路径
@@ -343,6 +385,17 @@ class MarkdownToConfluence:
             print(f"警告: 查找页面失败: {str(e)}")
             return None
 
+    def _strip_front_matter(self, content):
+        """移除 Markdown 文件开头的 YAML front matter"""
+        # 匹配开头的 ---，然后是任意内容（非贪婪），直到下一个 ---
+        pattern = r'^---\s*\n(.*?)\n---\s*\n'
+        # 如果找到了 front matter，移除它
+        if content.startswith('---'):
+            match = re.match(pattern, content, re.DOTALL)
+            if match:
+                return content[match.end():]
+        return content
+
     def publish(self, markdown_file, title=None, parent_page_id=None):
         """发布Markdown内容到Confluence"""
         try:
@@ -352,6 +405,9 @@ class MarkdownToConfluence:
             # 读取Markdown内容
             with open(markdown_file, 'r', encoding='utf-8') as f:
                 content = f.read()
+            
+            # 移除 front matter
+            content = self._strip_front_matter(content)
             
             # 如果没有指定标题，使用文件名
             if not title:
