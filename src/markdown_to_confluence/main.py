@@ -10,9 +10,10 @@ from markdown_to_confluence.image_handler import ImageHandler
 from markdown_to_confluence.preprocessor import MarkdownPreprocessor
 
 class MarkdownToConfluence:
-    def __init__(self, config_path=None):
+    def __init__(self, config_path=None, cli_config=None):
         """初始化转换器"""
-        self.config = ConfigLoader.load_config(config_path)
+        # 先加载命令行配置，确保最高优先级
+        self.config = ConfigLoader.load_config(config_path, cli_config)
         self.confluence_client = ConfluenceClient(self.config)
         self.content_handler = ContentHandler()
         self.image_handler = ImageHandler(self.confluence_client.client, self.config)
@@ -87,9 +88,9 @@ def main():
         description='将 Markdown 文件发布到 Confluence',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-配置方式:
-  1. 使用配置文件:
-     md2kms test.md --config config.yml
+配置方式（按优先级从高到低）:
+  1. 使用命令行参数:
+     md2kms test.md --url https://your-domain.atlassian.net --username your.email@domain.com --password your-token --space SPACEKEY
 
   2. 使用环境变量:
      export KMS_URL=https://your-domain.atlassian.net
@@ -98,7 +99,13 @@ def main():
      export KMS_SPACE=SPACEKEY
      md2kms test.md
 
+  3. 使用配置文件:
+     md2kms test.md --config config.yml
+
 示例:
+  # 使用命令行参数
+  md2kms test.md --url https://your-domain.atlassian.net --username your.email@domain.com --password your-token --space SPACEKEY --parent 123456
+
   # 使用文件名作为页面标题
   md2kms test.md --parent 123456
 
@@ -126,11 +133,42 @@ def main():
         '--config', '-c',
         help='配置文件路径（如果未指定，将使用环境变量）'
     )
+
+    # Confluence 配置参数
+    parser.add_argument(
+        '--url',
+        help='Confluence URL (例如: https://your-domain.atlassian.net)'
+    )
+    
+    parser.add_argument(
+        '--username',
+        help='Confluence 用户名/邮箱'
+    )
+    
+    parser.add_argument(
+        '--password',
+        help='Confluence API Token'
+    )
+    
+    parser.add_argument(
+        '--space',
+        help='Confluence Space Key'
+    )
     
     args = parser.parse_args()
     
     try:
-        converter = MarkdownToConfluence(args.config)
+        # 创建命令行参数配置字典，只包含非None的值
+        cli_config = {
+            'confluence': {k: v for k, v in {
+                'url': args.url,
+                'username': args.username,
+                'password': args.password,
+                'space': args.space
+            }.items() if v is not None}
+        }
+        
+        converter = MarkdownToConfluence(args.config, cli_config)
         converter.publish(args.markdown_file, args.title, args.parent)
     except KeyboardInterrupt:
         print("\n⚠️ 操作已取消")

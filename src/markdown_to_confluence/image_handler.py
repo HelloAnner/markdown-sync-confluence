@@ -95,29 +95,46 @@ class ImageHandler:
             """处理图片路径，支持相对路径和 attachments 目录"""
             if image_path.startswith(('http://', 'https://')):
                 return image_path
+
+            # 标准化路径分隔符
+            image_path = image_path.replace('\\', '/')
+            
+            # 如果是绝对路径，直接返回
+            if os.path.isabs(image_path):
+                return image_path
+
+            # 尝试多个可能的路径
+            possible_paths = [
+                # 1. 直接相对于 markdown 文件目录
+                os.path.join(markdown_dir, image_path),
                 
-            if 'attachments/' in image_path:
-                image_path = image_path.replace('attachments/', '')
-                image_path = os.path.join(markdown_dir, 'attachments', image_path)
-            elif not os.path.isabs(image_path):
-                direct_path = os.path.join(markdown_dir, image_path)
-                if os.path.exists(direct_path):
-                    image_path = direct_path
-                else:
-                    attachments_path = os.path.join(markdown_dir, 'attachments', image_path)
-                    if os.path.exists(attachments_path):
-                        image_path = attachments_path
-                    
-            return image_path
+                # 2. 检查 attachments 子目录
+                os.path.join(markdown_dir, 'attachments', image_path),
+                
+                # 3. 如果路径包含 attachments，则从 markdown 目录重新构建
+                os.path.join(markdown_dir, *image_path.split('/')) if '/' in image_path else None,
+                
+                # 4. 处理 '../' 相对路径
+                os.path.normpath(os.path.join(markdown_dir, image_path))
+            ]
+
+            # 尝试所有可能的路径
+            for path in possible_paths:
+                if path and os.path.exists(path):
+                    return os.path.abspath(path)
+            
+            # 如果都找不到，返回原始路径（让上层处理错误）
+            print(f"⚠️ 警告: 找不到图片文件: {image_path}")
+            print(f"搜索的路径:")
+            for path in possible_paths:
+                if path:
+                    print(f"- {path}")
+            return os.path.join(markdown_dir, image_path)
 
         def replace_obsidian_image(match):
             """处理 Obsidian 格式的图片 ![[image]]"""
             image_path = match.group(1)
-            if image_path.startswith('Pasted image '):
-                full_path = process_image_path(image_path)
-            else:
-                full_path = process_image_path(image_path)
-                
+            full_path = process_image_path(image_path)
             width, height = self._get_image_dimensions(full_path)
             image_url = self._upload_image(full_path, page_id)
             
@@ -147,6 +164,7 @@ class ImageHandler:
                     return f'<ac:image><ri:url ri:value="{image_url}"/></ac:image>'
             return match.group(0)
 
+        # 处理图片引用
         content = re.sub(r'!\[\[(.*?)\]\]', replace_obsidian_image, content)
         content = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_markdown_image, content)
         return content 
