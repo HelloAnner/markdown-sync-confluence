@@ -89,82 +89,93 @@ class ImageHandler:
             print(f"警告: 处理图片 {image_path} 失败: {str(e)}")
             return None
 
+    def process_image_path(self, image_path):
+        """处理图片路径，支持相对路径和尺寸信息"""
+        # 处理尺寸信息
+        size = None
+        if '|' in image_path:
+            image_path, size_str = image_path.split('|', 1)
+            try:
+                size = int(size_str)
+            except ValueError:
+                pass
+
+        # 处理图片路径
+        if image_path.startswith(('http://', 'https://')):
+            return image_path, size
+
+        # 标准化路径分隔符
+        image_path = image_path.replace('\\', '/')
+        
+        # 如果是绝对路径，直接返回
+        if os.path.isabs(image_path):
+            return image_path, size
+
+        # 尝试多个可能的路径
+        possible_paths = [
+            # 1. 直接相对于 markdown 文件目录
+            os.path.join(self.markdown_dir, image_path),
+            
+            # 2. 检查 attachments 子目录
+            os.path.join(self.markdown_dir, 'attachments', image_path),
+            
+            # 3. 如果路径包含 attachments，则从 markdown 目录重新构建
+            os.path.join(self.markdown_dir, *image_path.split('/')) if '/' in image_path else None,
+            
+            # 4. 处理 '../' 相对路径
+            os.path.normpath(os.path.join(self.markdown_dir, image_path))
+        ]
+
+        # 尝试所有可能的路径
+        for path in possible_paths:
+            if path and os.path.exists(path):
+                return os.path.abspath(path), size
+        
+        # 如果都找不到，返回原始路径
+        print(f"⚠️ 警告: 找不到图片文件: {image_path}")
+        print(f"搜索的路径:")
+        for path in possible_paths:
+            if path:
+                print(f"- {path}")
+        return os.path.join(self.markdown_dir, image_path), size
+
     def process_images(self, content, markdown_dir, page_id):
         """处理Markdown中的图片，上传并替换URL"""
-        def process_image_path(image_path):
-            """处理图片路径，支持相对路径和 attachments 目录"""
-            if image_path.startswith(('http://', 'https://')):
-                return image_path
+        self.markdown_dir = markdown_dir
+        self.page_id = page_id
 
-            # 标准化路径分隔符
-            image_path = image_path.replace('\\', '/')
+        def replace_image(match):
+            # 处理两种不同的匹配模式
+            if len(match.groups()) == 1:  # Obsidian 格式 ![[path]]
+                image_path = match.group(1)
+                alt_text = ""
+            else:  # Markdown 格式 ![alt](path)
+                alt_text = match.group(1)
+                image_path = match.group(2)
             
-            # 如果是绝对路径，直接返回
-            if os.path.isabs(image_path):
-                return image_path
+            full_path, size = self.process_image_path(image_path)
+            
+            if full_path.startswith(('http://', 'https://')):
+                if size:
+                    return f'<ac:image ac:width="{size}"><ri:url ri:value="{full_path}"/></ac:image>'
+                return f'<ac:image><ri:url ri:value="{full_path}"/></ac:image>'
+            
+            try:
+                if os.path.exists(full_path):
+                    image_url = self._upload_image(full_path, page_id)
+                    if image_url:
+                        if size:
+                            return f'<ac:image ac:width="{size}"><ri:url ri:value="{image_url}"/></ac:image>'
+                        return f'<ac:image><ri:url ri:value="{image_url}"/></ac:image>'
+            except Exception as e:
+                print(f"⚠️ 警告: 处理图片时出错 {full_path}: {str(e)}")
+            
+            return ''  # 如果处理失败，返回空字符串
 
-            # 尝试多个可能的路径
-            possible_paths = [
-                # 1. 直接相对于 markdown 文件目录
-                os.path.join(markdown_dir, image_path),
-                
-                # 2. 检查 attachments 子目录
-                os.path.join(markdown_dir, 'attachments', image_path),
-                
-                # 3. 如果路径包含 attachments，则从 markdown 目录重新构建
-                os.path.join(markdown_dir, *image_path.split('/')) if '/' in image_path else None,
-                
-                # 4. 处理 '../' 相对路径
-                os.path.normpath(os.path.join(markdown_dir, image_path))
-            ]
-
-            # 尝试所有可能的路径
-            for path in possible_paths:
-                if path and os.path.exists(path):
-                    return os.path.abspath(path)
-            
-            # 如果都找不到，返回原始路径（让上层处理错误）
-            print(f"⚠️ 警告: 找不到图片文件: {image_path}")
-            print(f"搜索的路径:")
-            for path in possible_paths:
-                if path:
-                    print(f"- {path}")
-            return os.path.join(markdown_dir, image_path)
-
-        def replace_obsidian_image(match):
-            """处理 Obsidian 格式的图片 ![[image]]"""
-            image_path = match.group(1)
-            full_path = process_image_path(image_path)
-            width, height = self._get_image_dimensions(full_path)
-            image_url = self._upload_image(full_path, page_id)
-            
-            if image_url:
-                if width and height:
-                    return f'<ac:image ac:width="{width}" ac:height="{height}"><ri:url ri:value="{image_url}"/></ac:image>'
-                else:
-                    return f'<ac:image><ri:url ri:value="{image_url}"/></ac:image>'
-            return match.group(0)
-
-        def replace_markdown_image(match):
-            """处理标准 Markdown 格式的图片 ![alt](path)"""
-            alt_text = match.group(1)
-            image_path = match.group(2)
-            
-            if image_path.startswith(('http://', 'https://')):
-                return f'<ac:image><ri:url ri:value="{image_path}"/></ac:image>'
-            
-            full_path = process_image_path(image_path)
-            width, height = self._get_image_dimensions(full_path)
-            image_url = self._upload_image(full_path, page_id)
-            
-            if image_url:
-                if width and height:
-                    return f'<ac:image ac:width="{width}" ac:height="{height}"><ri:url ri:value="{image_url}"/></ac:image>'
-                else:
-                    return f'<ac:image><ri:url ri:value="{image_url}"/></ac:image>'
-            return match.group(0)
-
-        # 处理图片引用
-        content = re.sub(r'!\[\[(.*?)\]\]', replace_obsidian_image, content)
-        content = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_markdown_image, content)
+        # 处理标准Markdown图片语法 ![alt](path)
+        content = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_image, content)
+        
+        # 处理Obsidian图片语法 ![[path]]
+        content = re.sub(r'!\[\[(.*?)\]\]', replace_image, content)
+        
         return content 
