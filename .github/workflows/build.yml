@@ -74,7 +74,15 @@ jobs:
         shell: powershell
         run: |
           irm https://astral.sh/uv/install.ps1 | iex
-          echo "$env:USERPROFILE\.cargo\bin" >> $env:GITHUB_PATH
+          # 刷新环境变量
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","User") + ";" + [System.Environment]::GetEnvironmentVariable("Path","Machine")
+          # 等待一下确保安装完成
+          Start-Sleep -Seconds 2
+          # 验证安装
+          Write-Host "Verifying uv installation..."
+          Get-Command uv
+          Write-Host "uv version:"
+          uv --version
 
       - name: Install dependencies (Unix)
         if: runner.os != 'Windows'
@@ -87,9 +95,18 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
-          uv pip install --system pyinstaller pyyaml pillow
-          uv sync
+          # 刷新环境变量
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","User") + ";" + [System.Environment]::GetEnvironmentVariable("Path","Machine")
+          Write-Host "Current PATH: $env:Path"
+          Write-Host "Looking for uv in: $env:USERPROFILE\.cargo\bin"
+          if (Test-Path "$env:USERPROFILE\.cargo\bin\uv.exe") {
+              Write-Host "uv.exe found"
+              & "$env:USERPROFILE\.cargo\bin\uv.exe" pip install --system pyinstaller pyyaml pillow
+              & "$env:USERPROFILE\.cargo\bin\uv.exe" sync
+          } else {
+              Write-Error "uv.exe not found"
+              exit 1
+          }
 
       - name: Build executable
         run: uv run python build.py
