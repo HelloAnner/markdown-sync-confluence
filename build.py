@@ -36,7 +36,7 @@ def build():
         f"--name={BINARY_NAME}",  # 输出文件名
         "--onefile",  # 打包成单个文件
         "--clean",  # 清理临时文件
-        f"--add-data={config_path}:markdown_to_confluence"  # 包含配置文件
+        f"--add-data={config_path}:markdown_to_confluence",  # 包含配置文件
         "--hidden-import=PIL._tkinter",  # 确保 PIL 相关依赖被包含
         "--hidden-import=PIL._imagingtk",
     ]
@@ -62,4 +62,4 @@ def build():
     print(f"2. 运行命令: {BINARY_NAME} --help")
 
 if __name__ == '__main__':
-    build() 
+    build()
