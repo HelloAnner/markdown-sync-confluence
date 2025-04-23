@@ -92,7 +92,7 @@ jobs:
           uv sync
 
       - name: Build executable
-        run: uv run python build.py=
+        run: uv run python build.py
 
       - name: Test executable
         shell: bash
