@@ -32,13 +32,13 @@ def build():
 
     # PyInstaller 参数
     args = [
-        MAIN_SCRIPT,                           # 主脚本
-        f'--name={BINARY_NAME}',              # 输出文件名
-        '--onefile',                          # 打包成单个文件
-        '--clean',                            # 清理临时文件
-        f'--add-data={config_path}:markdown_to_confluence',  # 包含配置文件
-        '--hidden-import=PIL._tkinter',       # 确保 PIL 相关依赖被包含
-        '--hidden-import=PIL._imagingtk',
+        MAIN_SCRIPT,  # 主脚本
+        f"--name={BINARY_NAME}",  # 输出文件名
+        "--onefile",  # 打包成单个文件
+        "--clean",  # 清理临时文件
+        f"--add-data={config_path}:markdown_to_confluence"  # 包含配置文件
+        "--hidden-import=PIL._tkinter",  # 确保 PIL 相关依赖被包含
+        "--hidden-import=PIL._imagingtk",
     ]
 
     # 根据操作系统添加图标和其他选项
@@ -55,7 +55,7 @@ def build():
         binary_path = f'dist\\{BINARY_NAME}.exe'
     else:
         binary_path = f'dist/{BINARY_NAME}'
-    
+
     print(f"二进制文件位置: {binary_path}")
     print("\n使用方法:")
     print("1. 将可执行文件复制到系统PATH目录")

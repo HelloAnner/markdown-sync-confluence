@@ -1,0 +1,98 @@
+name: Build Executables
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS builds
+          - os: macos-latest
+            arch: amd64
+            python-arch: x64
+          - os: macos-14
+            arch: arm64
+            python-arch: arm64
+          
+          # Linux builds
+          - os: ubuntu-latest
+            arch: amd64
+            python-arch: x64
+          - os: ubuntu-latest
+            arch: arm64
+            python-arch: aarch64
+          
+          # Windows build
+          - os: windows-latest
+            arch: amd64
+            python-arch: x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: ${{ matrix.python-arch }}
+
+      - name: Install uv
+        shell: bash
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Add uv to PATH
+        shell: bash
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system pyinstaller
+          uv sync
+
+      - name: Build executable
+        run: python build.py
+
+      - name: Prepare artifact name
+        id: artifact-name
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            echo "name=md2kms-${{ matrix.arch }}-windows.exe" >> $GITHUB_OUTPUT
+            echo "src=dist/md2kms.exe" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.os }}" = "macos-14" ]; then
+            echo "name=md2kms-${{ matrix.arch }}-darwin" >> $GITHUB_OUTPUT
+            echo "src=dist/md2kms" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            echo "name=md2kms-${{ matrix.arch }}-darwin" >> $GITHUB_OUTPUT
+            echo "src=dist/md2kms" >> $GITHUB_OUTPUT
+          else
+            echo "name=md2kms-${{ matrix.arch }}-linux" >> $GITHUB_OUTPUT
+            echo "src=dist/md2kms" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact-name.outputs.name }}
+          path: ${{ steps.artifact-name.outputs.src }}
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: ${{ steps.artifact-name.outputs.src }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
