@@ -22,25 +22,38 @@ jobs:
           - os: macos-latest
             arch: amd64
             python-arch: x64
+            binary-name: md2kms-amd64-darwin
           - os: macos-14
             arch: arm64
             python-arch: arm64
+            binary-name: md2kms-arm64-darwin
           
           # Linux builds
           - os: ubuntu-latest
             arch: amd64
             python-arch: x64
+            binary-name: md2kms-amd64-linux
           - os: ubuntu-latest
             arch: arm64
-            python-arch: aarch64
+            python-arch: x64  # Changed from aarch64 to x64 for compatibility
+            binary-name: md2kms-arm64-linux
+            qemu: true
           
           # Windows build
           - os: windows-latest
             arch: amd64
             python-arch: x64
+            binary-name: md2kms-amd64-windows.exe
 
     steps:
       - uses: actions/checkout@v4
+
+      # Set up QEMU for ARM64 Linux builds
+      - name: Set up QEMU
+        if: matrix.qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -65,34 +78,31 @@ jobs:
       - name: Build executable
         run: python build.py
 
-      - name: Prepare artifact name
-        id: artifact-name
+      - name: Prepare binary
         shell: bash
         run: |
+          mkdir -p release
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            echo "name=md2kms-${{ matrix.arch }}-windows.exe" >> $GITHUB_OUTPUT
-            echo "src=dist/md2kms.exe" >> $GITHUB_OUTPUT
-          elif [ "${{ matrix.os }}" = "macos-14" ]; then
-            echo "name=md2kms-${{ matrix.arch }}-darwin" >> $GITHUB_OUTPUT
-            echo "src=dist/md2kms" >> $GITHUB_OUTPUT
-          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
-            echo "name=md2kms-${{ matrix.arch }}-darwin" >> $GITHUB_OUTPUT
-            echo "src=dist/md2kms" >> $GITHUB_OUTPUT
+            cp dist/md2kms.exe release/${{ matrix.binary-name }}
           else
-            echo "name=md2kms-${{ matrix.arch }}-linux" >> $GITHUB_OUTPUT
-            echo "src=dist/md2kms" >> $GITHUB_OUTPUT
+            cp dist/md2kms release/${{ matrix.binary-name }}
+            chmod +x release/${{ matrix.binary-name }}
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.artifact-name.outputs.name }}
-          path: ${{ steps.artifact-name.outputs.src }}
+          name: ${{ matrix.binary-name }}
+          path: release/${{ matrix.binary-name }}
 
       - name: Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: ${{ steps.artifact-name.outputs.src }}
+          files: release/${{ matrix.binary-name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
