@@ -90,6 +90,135 @@ class HighlightTransformer(MarkdownTransformer):
         return content
 
 
+class TableTransformer(MarkdownTransformer):
+    """表格转换器，解决表格中的HTML标签闭合问题"""
+
+    def post_process(self, html_content: str) -> str:
+        """修复表格中的HTML问题"""
+        if "<table>" in html_content:
+            # 确保表格中的所有标签正确闭合
+            # 替换自闭合标签，确保正确闭合
+            html_content = re.sub(r'<br\s*/?>(?!</br>)', '<br></br>', html_content)
+            
+            # 检查并修复所有表格中的HTML
+            html_content = re.sub(
+                r'(<table>.*?</table>)',
+                self._fix_table_html,
+                html_content,
+                flags=re.DOTALL
+            )
+        
+        return html_content
+    
+    def _fix_table_html(self, match):
+        """修复表格HTML"""
+        table_html = match.group(1)
+        
+        # 确保tbody标签存在
+        if "<tbody>" not in table_html:
+            table_html = table_html.replace("<table>", "<table><tbody>")
+            table_html = table_html.replace("</table>", "</tbody></table>")
+        
+        # 修复表格行
+        rows = re.findall(r'<tr>(.*?)</tr>', table_html, re.DOTALL)
+        fixed_table = "<table><tbody>"
+        
+        for row in rows:
+            fixed_row = "<tr>"
+            
+            # 修复单元格，确保每个单元格都正确闭合
+            for cell_type in ['th', 'td']:
+                # 使用非贪婪匹配，确保每个标签都有对应的闭合标签
+                cell_pattern = f'<{cell_type}(.*?)>(.*?)</{cell_type}>'
+                cells = re.findall(cell_pattern, row, re.DOTALL)
+                
+                for attrs, content in cells:
+                    # 确保内部的br标签正确闭合
+                    content = re.sub(r'<br\s*/?>(?!</br>)', '<br></br>', content)
+                    fixed_row += f'<{cell_type}{attrs}>{content}</{cell_type}>'
+            
+            # 如果没有找到任何单元格，检查是否存在自闭合的td或未正常解析的单元格
+            if "<td" not in fixed_row and "<th" not in fixed_row:
+                # 为每个可能的单元格添加正确的闭合标签
+                row = re.sub(r'<(td|th)([^>]*)>', r'<\1\2>', row)
+                row = re.sub(r'</(td|th)>', r'</\1>', row)
+                fixed_row += row
+            
+            fixed_row += "</tr>"
+            fixed_table += fixed_row
+        
+        fixed_table += "</tbody></table>"
+        
+        return fixed_table
+
+
+class FoldingTransformer(MarkdownTransformer):
+    """折叠块转换器，将 ---标题--- 和内容转换为 Confluence 的展开宏"""
+    
+    def transform(self, content: str) -> str:
+        """识别并处理折叠块"""
+        # 存储折叠块信息
+        fold_blocks = []
+        
+        # 为了避免干扰普通的分隔线(---)，我们需要更精确的模式
+        # 1. 首先匹配自定义标题的折叠块：---标题--- 内容 ---标题---
+        # 确保标题两侧的---是单独一行的，且标题不为空
+        fold_pattern = r'(?:^|\n)---([^-\n]+?)---\s*\n(.*?)\n\s*---\1---(?:\n|$)'
+        
+        def replace_fold(match):
+            title = match.group(1).strip()
+            fold_content = match.group(2).strip()
+            placeholder = f"FOLD_PLACEHOLDER_{len(fold_blocks)}"
+            fold_blocks.append((title, fold_content))
+            return f"\n{placeholder}\n"
+        
+        # 替换折叠块为占位符
+        processed_content = re.sub(fold_pattern, replace_fold, content, flags=re.DOTALL)
+        
+        # 2. 处理旧格式的折叠块（无标题指定）：---折叠--- 内容 ---折叠---
+        # 同样确保两侧的标记是单独一行的
+        old_fold_pattern = r'(?:^|\n)---折叠---\s*\n(.*?)\n\s*---折叠---(?:\n|$)'
+        
+        def replace_old_fold(match):
+            fold_content = match.group(1).strip()
+            placeholder = f"FOLD_PLACEHOLDER_{len(fold_blocks)}"
+            fold_blocks.append(("点击展开", fold_content))
+            return f"\n{placeholder}\n"
+        
+        # 替换旧格式折叠块为占位符
+        processed_content = re.sub(old_fold_pattern, replace_old_fold, processed_content, flags=re.DOTALL)
+        
+        self.fold_blocks = fold_blocks
+        return processed_content
+    
+    def post_process(self, html_content: str) -> str:
+        """将折叠块占位符替换为 Confluence 展开宏"""
+        for i, (title, fold_content) in enumerate(self.fold_blocks):
+            placeholder = f"FOLD_PLACEHOLDER_{i}"
+            
+            # 转换折叠内容为HTML
+            fold_html = markdown2.markdown(
+                fold_content,
+                extras=["fenced-code-blocks", "tables", "header-ids", "code-friendly"]
+            )
+            
+            # 创建Confluence展开宏
+            expand_macro = (
+                '<ac:structured-macro ac:name="expand">'
+                f'<ac:parameter ac:name="title">{html.escape(title)}</ac:parameter>'
+                '<ac:rich-text-body>'
+                f'{fold_html}'
+                '</ac:rich-text-body>'
+                '</ac:structured-macro>'
+            )
+            
+            # 替换占位符
+            html_content = html_content.replace(f"<p>{placeholder}</p>", expand_macro)
+            html_content = html_content.replace(placeholder, expand_macro)
+        
+        return html_content
+
+
 class ContentHandler:
     """内容处理器，负责将 Markdown 转换为 Confluence 格式"""
 
@@ -103,8 +232,10 @@ class ContentHandler:
         ]
         # 初始化转换器列表
         self.transformers: List[MarkdownTransformer] = [
+            FoldingTransformer(),  # 先处理折叠块
             MermaidTransformer(),
             HighlightTransformer(),
+            TableTransformer(),
         ]
 
     def _process_code_blocks(self, html_content: str) -> str:
