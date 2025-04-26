@@ -1,7 +1,6 @@
 package markdown
 
 import (
-	"encoding/json"
 	"fmt"
 	"mime"
 	"os"
@@ -14,42 +13,49 @@ import (
 	"github.com/HelloAnner/markdown-sync-confluence/pkg/confluence"
 )
 
-// ImageHandler handles the processing and uploading of images
+// ImageHandler 处理图片的上传和处理
 type ImageHandler struct {
-	client      *confluence.Client
-	config      *config.Config
-	pageID      string
-	markdownDir string
-	uploaded    map[string]string // Cache for uploaded images
-	maxWidth    int
-	maxHeight   int
-	minScale    float64
+	client      *confluence.Client // Confluence客户端
+	config      *config.Config     // 应用配置
+	pageID      string             // 当前页面ID
+	markdownDir string             // Markdown文件所在目录
+	uploaded    map[string]string  // 已上传图片的缓存，键为本地路径，值为Confluence URL
+	maxWidth    int                // 图片最大宽度
+	maxHeight   int                // 图片最大高度
+	minScale    float64            // 最小缩放比例
 }
 
-// client: 客户端
-// config: 配置
-// pageID: 页面ID
-// markdownDir: markdown文件目录
-// uploaded: 上传的图片缓存
-// maxWidth: 最大宽度
-// maxHeight: 最大高度
+// NewImageHandler 创建一个新的图片处理器
+// 参数:
+//   - client: Confluence客户端
+//   - config: 应用配置
+// 返回:
+//   - *ImageHandler: 图片处理器实例
 func NewImageHandler(client *confluence.Client, config *config.Config) *ImageHandler {
 	return &ImageHandler{
 		client:    client,
 		config:    config,
 		uploaded:  make(map[string]string),
-		maxWidth:  600,
-		maxHeight: 400,
-		minScale:  0.6,
+		maxWidth:  600, // 默认最大宽度
+		maxHeight: 400, // 默认最大高度
+		minScale:  0.6, // 默认最小缩放比例
 	}
 }
 
-// ProcessImages 处理Markdown图片引用并上传到Confluence
+// ProcessImages 处理HTML内容中的图片并上传到Confluence
+// 参数:
+//   - content: 要处理的HTML内容
+//   - markdownDir: Markdown文件所在目录（用于解析相对路径）
+//   - pageID: Confluence页面ID
+// 返回:
+//   - string: 处理后的内容
+//   - error: 处理过程中的错误
 func (h *ImageHandler) ProcessImages(content, markdownDir, pageID string) (string, error) {
+	// 设置上下文信息
 	h.markdownDir = markdownDir
 	h.pageID = pageID
 
-	// 1. 首先处理HTML中的已转换的<img>标签
+	// 1. 处理HTML中的<img>标签
 	imgRe := regexp.MustCompile(`<img[^>]*src="([^"]+)"[^>]*\/?>`)
 	content = imgRe.ReplaceAllStringFunc(content, func(match string) string {
 		// 提取src属性
@@ -66,54 +72,69 @@ func (h *ImageHandler) ProcessImages(content, markdownDir, pageID string) (strin
 			altText = altMatches[1]
 		}
 		
-		// 调用现有的处理函数
+		// 处理图片引用
 		return h.processImageReference(imgSrc, altText)
 	})
 	
-	// 2. 处理任何剩余的标准Markdown图片 ![alt](path)
+	// 2. 处理Markdown格式的图片引用 ![alt](path)
 	content = regexp.MustCompile(`!\[(.*?)\]\((.*?)\)`).ReplaceAllStringFunc(content, h.replaceImage)
 	
-	// 3. 处理Obsidian-style图片 ![[path]]
+	// 3. 处理Obsidian格式的图片引用 ![[path]]
 	content = regexp.MustCompile(`!\[\[(.*?)\]\]`).ReplaceAllStringFunc(content, h.replaceObsidianImage)
 
 	return content, nil
 }
 
-// replaceImage 处理标准Markdown图片格式
+// replaceImage 处理标准Markdown格式的图片引用
+// 参数:
+//   - match: 匹配到的Markdown图片字符串，格式为![alt](path)
+// 返回:
+//   - string: 替换后的Confluence XML格式图片标签
 func (h *ImageHandler) replaceImage(match string) string {
 	re := regexp.MustCompile(`!\[(.*?)\]\((.*?)\)`)
 	submatches := re.FindStringSubmatch(match)
 	if len(submatches) < 3 {
-		return match
+		return match // 格式不匹配则返回原始内容
 	}
 
-	altText := submatches[1]
-	imagePath := submatches[2]
+	altText := submatches[1]   // 图片替代文本
+	imagePath := submatches[2] // 图片路径
 
 	return h.processImageReference(imagePath, altText)
 }
 
-// replaceObsidianImage 处理Obsidian-style图片格式
+// replaceObsidianImage 处理Obsidian格式的图片引用
+// 参数:
+//   - match: 匹配到的Obsidian图片字符串，格式为![[path]]
+// 返回:
+//   - string: 替换后的Confluence XML格式图片标签
 func (h *ImageHandler) replaceObsidianImage(match string) string {
 	re := regexp.MustCompile(`!\[\[(.*?)\]\]`)
 	submatches := re.FindStringSubmatch(match)
 	if len(submatches) < 2 {
-		return match
+		return match // 格式不匹配则返回原始内容
 	}
 
-	imagePath := submatches[1]
-	return h.processImageReference(imagePath, "")
+	imagePath := submatches[1] // 图片路径
+	return h.processImageReference(imagePath, "") // Obsidian格式没有alt文本
 }
 
-// processImageReference 处理实际的图片处理和替换
+// processImageReference 处理图片引用并生成Confluence XML
+// 参数:
+//   - imagePath: 图片路径（可能是相对路径或URL）
+//   - altText: 图片替代文本
+// 返回:
+//   - string: Confluence XML格式的图片标签
 func (h *ImageHandler) processImageReference(imagePath, altText string) string {
+	// 处理图片路径并获取尺寸信息
 	fullPath, size := h.processImagePath(imagePath)
 	
 	// 处理远程URL
 	if strings.HasPrefix(fullPath, "http://") || strings.HasPrefix(fullPath, "https://") {
-		// 对URL进行转义，确保所有的特殊字符（特别是&字符）都被正确处理
+		// 转义URL中的XML特殊字符
 		escapedURL := escapeXMLAttributeValue(fullPath)
 		
+		// 根据是否有尺寸生成适当的XML
 		if size > 0 {
 			return fmt.Sprintf("<ac:image ac:width=\"%d\"><ri:url ri:value=\"%s\"/></ac:image>", 
 				size, escapedURL)
@@ -123,15 +144,17 @@ func (h *ImageHandler) processImageReference(imagePath, altText string) string {
 	
 	// 处理本地文件
 	if _, err := os.Stat(fullPath); err == nil {
+		// 上传图片到Confluence
 		imageURL, err := h.uploadImage(fullPath)
 		if err != nil {
-			fmt.Printf("⚠️ Warning: Failed to upload image %s: %v\n", fullPath, err)
+			fmt.Printf("⚠️ 警告: 图片上传失败 %s: %v\n", fullPath, err)
 			return ""
 		}
 		
-		// 对URL进行转义
+		// 转义URL中的XML特殊字符
 		escapedURL := escapeXMLAttributeValue(imageURL)
 		
+		// 根据是否有尺寸生成适当的XML
 		if size > 0 {
 			return fmt.Sprintf("<ac:image ac:width=\"%d\"><ri:url ri:value=\"%s\"/></ac:image>", 
 				size, escapedURL)
@@ -139,12 +162,16 @@ func (h *ImageHandler) processImageReference(imagePath, altText string) string {
 		return fmt.Sprintf("<ac:image><ri:url ri:value=\"%s\"/></ac:image>", escapedURL)
 	}
 	
-	// 图片未找到
-	fmt.Printf("⚠️ Warning: Image file not found: %s\n", fullPath)
+	// 图片文件未找到
+	fmt.Printf("⚠️ 警告: 图片文件未找到: %s\n", fullPath)
 	return ""
 }
 
 // escapeXMLAttributeValue 转义XML属性值中的特殊字符
+// 参数:
+//   - s: 需要转义的字符串
+// 返回:
+//   - string: 转义后的字符串
 func escapeXMLAttributeValue(s string) string {
 	// 替换XML中的特殊字符
 	s = strings.ReplaceAll(s, "&", "&amp;")
@@ -156,8 +183,13 @@ func escapeXMLAttributeValue(s string) string {
 }
 
 // processImagePath 处理图片路径并提取尺寸信息
+// 参数:
+//   - imagePath: 图片路径（可能包含尺寸信息）
+// 返回:
+//   - string: 处理后的完整图片路径
+//   - int: 图片尺寸（如果指定了的话）
 func (h *ImageHandler) processImagePath(imagePath string) (string, int) {
-	// 提取尺寸信息如果存在
+	// 提取尺寸信息（如果存在）
 	size := 0
 	if strings.Contains(imagePath, "|") {
 		parts := strings.Split(imagePath, "|")
@@ -177,12 +209,12 @@ func (h *ImageHandler) processImagePath(imagePath string) (string, int) {
 	// 标准化路径分隔符
 	imagePath = strings.ReplaceAll(imagePath, "\\", "/")
 	
-	// 如果它是绝对路径，直接使用它
+	// 如果是绝对路径，直接使用
 	if filepath.IsAbs(imagePath) {
 		return imagePath, size
 	}
 	
-	// 尝试不同的可能路径，如Python版本
+	// 尝试多种可能的相对路径
 	possiblePaths := []string{
 		// 1. 直接相对于markdown文件目录
 		filepath.Join(h.markdownDir, imagePath),
@@ -191,7 +223,7 @@ func (h *ImageHandler) processImagePath(imagePath string) (string, int) {
 		filepath.Join(h.markdownDir, "attachments", imagePath),
 	}
 	
-	// 3. 如果路径包含attachments，从markdown目录重建
+	// 3. 如果路径包含/，尝试从markdown目录重建完整路径
 	if strings.Contains(imagePath, "/") {
 		pathParts := strings.Split(imagePath, "/")
 		if len(pathParts) > 0 {
@@ -204,42 +236,51 @@ func (h *ImageHandler) processImagePath(imagePath string) (string, int) {
 	normPath := filepath.Clean(filepath.Join(h.markdownDir, imagePath))
 	possiblePaths = append(possiblePaths, normPath)
 	
-	// Check each path
+	// 检查每个可能的路径
 	for _, path := range possiblePaths {
 		if _, err := os.Stat(path); err == nil {
-			return path, size
+			return path, size // 返回第一个存在的路径
 		}
 	}
 	
-	// Print debug info like in Python version
-	fmt.Printf("⚠️ Warning: Could not find image file: %s\n", imagePath)
-	fmt.Println("Searched paths:")
+	// 打印调试信息，提示所有尝试过的路径
+	fmt.Printf("⚠️ 警告: 图片文件未找到: %s\n", imagePath)
+	fmt.Println("尝试过的路径:")
 	for _, path := range possiblePaths {
 		fmt.Printf("- %s\n", path)
 	}
 	
-	// Return default path (will likely fail later, but we keep the same behavior)
+	// 返回默认路径（后续会处理失败）
 	return filepath.Join(h.markdownDir, imagePath), size
 }
 
-// getContentType determines the MIME type of a file
+// getContentType 确定文件的MIME类型
+// 参数:
+//   - path: 文件路径
+// 返回:
+//   - string: 文件的MIME类型
 func (h *ImageHandler) getContentType(path string) string {
 	ext := filepath.Ext(path)
 	contentType := mime.TypeByExtension(ext)
 	if contentType == "" {
-		return "image/png" // Default to PNG if unknown
+		return "image/png" // 默认为PNG
 	}
 	return contentType
 }
 
-// uploadImage uploads an image to Confluence
+// uploadImage 上传图片到Confluence
+// 参数:
+//   - imagePath: 图片文件的本地路径
+// 返回:
+//   - string: 上传后的图片URL
+//   - error: 上传过程中的错误
 func (h *ImageHandler) uploadImage(imagePath string) (string, error) {
-	// Check if we've already uploaded this image
+	// 检查缓存中是否已有此图片
 	if url, exists := h.uploaded[imagePath]; exists {
 		return url, nil
 	}
 
-	// Ensure we're working with absolute paths
+	// 确保使用绝对路径
 	var absImagePath string
 	if filepath.IsAbs(imagePath) {
 		absImagePath = imagePath
@@ -247,53 +288,53 @@ func (h *ImageHandler) uploadImage(imagePath string) (string, error) {
 		var err error
 		absImagePath, err = filepath.Abs(imagePath)
 		if err != nil {
-			return "", fmt.Errorf("failed to get absolute path: %w", err)
+			return "", fmt.Errorf("获取绝对路径失败: %w", err)
 		}
 	}
 
-	// Verify the image exists
+	// 确认图片文件存在
 	if _, err := os.Stat(absImagePath); err != nil {
-		fmt.Printf("警告: 找不到图片 %s\n", absImagePath)
-		return "", fmt.Errorf("image file not found: %w", err)
+		fmt.Printf("⚠️ 警告: 图片未找到 %s\n", absImagePath)
+		return "", fmt.Errorf("图片文件未找到: %w", err)
 	}
 
-	// Get the filename and content type
+	// 获取文件名和内容类型
 	filename := filepath.Base(absImagePath)
 	contentType := h.getContentType(absImagePath)
 
-	// Read the image file
+	// 读取图片文件内容
 	fileContent, err := os.ReadFile(absImagePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read image file: %w", err)
+		return "", fmt.Errorf("读取图片文件失败: %w", err)
 	}
 
-	// Upload to Confluence
+	// 上传到Confluence
 	result, err := h.client.AttachFile(h.pageID, filename, fileContent, contentType)
 	if err != nil {
-		// Check if error is due to duplicate file name
+		// 处理重复文件名错误
 		if strings.Contains(err.Error(), "Cannot add a new attachment with same file name") {
-			fmt.Printf("⚠️ 注意: 图片 %s 已经存在，正在获取现有图片的URL\n", filename)
+			fmt.Printf("ℹ️ 提示: 图片 %s 已存在，正在获取现有图片的URL\n", filename)
 			
-			// Get attachments for this page to find the existing image
+			// 获取当前页面的所有附件
 			attachments, attachErr := h.client.GetAttachments(h.pageID)
 			if attachErr != nil {
-				return "", fmt.Errorf("failed to get attachments: %w", attachErr)
+				return "", fmt.Errorf("获取附件列表失败: %w", attachErr)
 			}
 			
-			// Find the attachment with matching filename
+			// 查找匹配文件名的附件
 			for _, attachment := range attachments {
 				if title, ok := attachment["title"].(string); ok && title == filename {
-					// Extract the download URL
+					// 提取下载URL
 					if links, ok := attachment["_links"].(map[string]interface{}); ok {
 						if download, ok := links["download"].(string); ok {
-							// Ensure URL is absolute
+							// 确保URL是绝对路径
 							imageURL := download
 							if !strings.HasPrefix(imageURL, "http://") && !strings.HasPrefix(imageURL, "https://") {
 								baseURL := strings.TrimSuffix(h.config.Confluence.URL, "/")
 								imageURL = fmt.Sprintf("%s%s", baseURL, imageURL)
 							}
 							
-							// Cache the URL (不转义原始缓存，转义发生在使用时)
+							// 缓存URL
 							h.uploaded[imagePath] = imageURL
 							fmt.Printf("✓ 使用现有图片: %s\n", filename)
 							fmt.Printf("  图片URL: %s\n", imageURL)
@@ -303,95 +344,61 @@ func (h *ImageHandler) uploadImage(imagePath string) (string, error) {
 				}
 			}
 			
-			// If we get here, we couldn't find the matching attachment
-			return "", fmt.Errorf("failed to find existing attachment: %s", filename)
+			// 找不到匹配的附件
+			return "", fmt.Errorf("未找到现有附件: %s", filename)
 		}
 		
-		// For other errors, return as usual
-		fmt.Printf("警告: 上传图片失败: %v\n", err)
-		return "", fmt.Errorf("failed to upload to Confluence: %w", err)
+		// 其他上传错误
+		fmt.Printf("⚠️ 警告: 上传图片失败: %v\n", err)
+		return "", fmt.Errorf("上传到Confluence失败: %w", err)
 	}
 
-	// Debug output for understanding response structure
-	jsonData, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Printf("Debug: Attachment response: %s\n", jsonData)
-
-	// 从响应中提取URL的多种尝试方式
+	// 从响应中提取URL
 	var imageURL string
 	
-	// 尝试方法1: 检查直接的 _links.download 字段
+	// 方法1: 检查_links.download字段
 	if links, ok := result["_links"].(map[string]interface{}); ok {
 		if download, ok := links["download"].(string); ok {
 			imageURL = download
-			fmt.Printf("Debug: Found URL in _links.download: %s\n", imageURL)
 		}
 	}
 	
-	// 尝试方法2: 检查 results 数组中的第一个结果
+	// 方法2: 检查results数组中的第一个结果
 	if imageURL == "" && result["results"] != nil {
 		if results, ok := result["results"].([]interface{}); ok && len(results) > 0 {
 			if firstResult, ok := results[0].(map[string]interface{}); ok {
 				if links, ok := firstResult["_links"].(map[string]interface{}); ok {
 					if download, ok := links["download"].(string); ok {
 						imageURL = download
-						fmt.Printf("Debug: Found URL in results[0]._links.download: %s\n", imageURL)
 					}
 				}
 			}
 		}
 	}
 	
-	// 尝试方法3: 检查self字段
-	if imageURL == "" && result["self"] != nil {
-		if self, ok := result["self"].(string); ok {
-			// 将self URL转换为下载URL
-			imageURL = strings.Replace(self, "/rest/api/", "/download/attachments/", 1)
-			fmt.Printf("Debug: Constructed URL from self: %s\n", imageURL)
-		}
-	}
-	
-	// 尝试方法4: 检查其他可能的字段名
-	if imageURL == "" {
-		// 尝试url字段
-		if url, ok := result["url"].(string); ok {
-			imageURL = url
-			fmt.Printf("Debug: Found URL in url field: %s\n", imageURL)
-		}
-		
-		// 尝试downloadUrl字段
-		if imageURL == "" {
-			if downloadUrl, ok := result["downloadUrl"].(string); ok {
-				imageURL = downloadUrl
-				fmt.Printf("Debug: Found URL in downloadUrl field: %s\n", imageURL)
-			}
-		}
-	}
-	
-	// 尝试方法5: 如果有ID，手动构建URL
+	// 方法3: 尝试从ID和文件名构建URL
 	if imageURL == "" && result["id"] != nil {
 		if _, ok := result["id"].(string); ok {
 			baseURL := strings.TrimSuffix(h.config.Confluence.URL, "/")
 			imageURL = fmt.Sprintf("%s/download/attachments/%s/%s", baseURL, h.pageID, filename)
-			fmt.Printf("Debug: Constructed URL from ID and filename: %s\n", imageURL)
 		}
 	}
 	
 	// 确保URL是绝对路径
 	if imageURL != "" {
 		if !strings.HasPrefix(imageURL, "http://") && !strings.HasPrefix(imageURL, "https://") {
-			// 确保基础URL没有多余的斜杠
 			baseURL := strings.TrimSuffix(h.config.Confluence.URL, "/")
 			imageURL = fmt.Sprintf("%s%s", baseURL, imageURL)
 		}
 		
-		// 缓存并返回URL (不转义原始缓存，转义发生在使用时)
+		// 缓存并返回URL
 		h.uploaded[imagePath] = imageURL
-		fmt.Printf("✓ 成功上传图片: %s\n", filename)
+		fmt.Printf("✓ 图片上传成功: %s\n", filename)
 		fmt.Printf("  图片URL: %s\n", imageURL)
 		return imageURL, nil
 	}
 	
-	// 如果仍然找不到URL，报错
-	fmt.Printf("警告: 无法获取图片 %s 的链接信息，请检查API响应\n", filename)
-	return "", fmt.Errorf("failed to get URL for uploaded image")
+	// 找不到URL
+	fmt.Printf("⚠️ 警告: 无法获取图片 %s 的URL，请检查API响应\n", filename)
+	return "", fmt.Errorf("无法获取已上传图片的URL")
 } 

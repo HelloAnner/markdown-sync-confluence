@@ -22,98 +22,61 @@ jobs:
           # macOS builds
           - os: macos-latest
             arch: amd64
-            python-arch: x64
-            binary-name: md2kms-amd64-darwin
-          - os: macos-14
+            binary-name: md2kms-darwin-amd64
+          - os: macos-latest
             arch: arm64
-            python-arch: arm64
-            binary-name: md2kms-arm64-darwin
+            binary-name: md2kms-darwin-arm64
           
           # Linux builds
           - os: ubuntu-latest
             arch: amd64
-            python-arch: x64
-            binary-name: md2kms-amd64-linux
+            binary-name: md2kms-linux-amd64
           - os: ubuntu-latest
             arch: arm64
-            python-arch: x64
-            binary-name: md2kms-arm64-linux
-            qemu: true
+            binary-name: md2kms-linux-arm64
           
           # Windows build
           - os: windows-latest
             arch: amd64
-            python-arch: x64
-            binary-name: md2kms-amd64-windows.exe
+            binary-name: md2kms-windows-amd64.exe
 
     steps:
       - uses: actions/checkout@v4
-
-      # Set up QEMU for ARM64 Linux builds
-      - name: Set up QEMU
-        if: matrix.qemu
-        uses: docker/setup-qemu-action@v3
         with:
-          platforms: arm64
+          fetch-depth: 0  # 获取完整历史以便正确生成版本号
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Go
+        uses: actions/setup-go@v4
         with:
-          python-version: '3.11'
-          architecture: ${{ matrix.python-arch }}
+          go-version: '1.21'
+          cache: true
 
-      - name: Install uv (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
+      # 设置特殊的交叉编译环境
+      - name: Set up cross-compilation for ARM64
+        if: matrix.arch == 'arm64'
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          echo "CGO_ENABLED=0" >> $GITHUB_ENV
 
-      - name: Install uv (Windows)
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          irm https://astral.sh/uv/install.ps1 | iex
-          echo "$env:USERPROFILE\.cargo\bin" >> $env:GITHUB_PATH
-
-      - name: Install dependencies (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          uv pip install --system pyinstaller pyyaml pillow
-          uv sync
-
-      - name: Install dependencies (Windows)
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
-          uv pip install --system pyinstaller pyyaml pillow
-          uv sync
-
-      - name: Build executable
-        run: uv run python build.py
-
-      - name: Test executable
-        shell: bash
-        run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            ./dist/md2kms.exe --help || echo "Windows test skipped"
-          else
-            chmod +x ./dist/md2kms
-            ./dist/md2kms --help || echo "Test failed but continuing..."
-          fi
-
-      - name: Prepare binary
-        shell: bash
+      # 编译执行文件
+      - name: Build with Go
+        env:
+          GOOS: ${{ matrix.os == 'windows-latest' && 'windows' || matrix.os == 'macos-latest' && 'darwin' || 'linux' }}
+          GOARCH: ${{ matrix.arch }}
         run: |
           mkdir -p release
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp dist/md2kms.exe release/${{ matrix.binary-name }}
-          else
-            cp dist/md2kms release/${{ matrix.binary-name }}
-            chmod +x release/${{ matrix.binary-name }}
-          fi
+          go build -ldflags="-s -w" -o release/${{ matrix.binary-name }} .
+
+      # 测试生成的执行文件
+      - name: Test executable (non-Windows)
+        if: matrix.os != 'windows-latest'
+        run: |
+          chmod +x release/${{ matrix.binary-name }}
+          release/${{ matrix.binary-name }} --help || echo "Test failed but continuing..."
+
+      - name: Test executable (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          release/${{ matrix.binary-name }} --help || echo "Test failed but continuing..."
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
