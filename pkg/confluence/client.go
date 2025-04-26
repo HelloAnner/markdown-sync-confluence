@@ -13,13 +13,13 @@ import (
 	"github.com/HelloAnner/markdown-sync-confluence/pkg/config"
 )
 
-// Client represents a Confluence API client
+// Client 表示一个 Confluence API 客户端
 type Client struct {
 	config     *config.Config
 	httpClient *http.Client
 }
 
-// Page represents a Confluence page
+// Page 表示一个 Confluence 页面
 type Page struct {
 	ID      string         `json:"id"`
 	Title   string         `json:"title"`
@@ -27,12 +27,12 @@ type Page struct {
 	Links   map[string]string `json:"_links"`
 }
 
-// VersionInfo represents the version information of a page
+// VersionInfo 表示一个页面的版本信息
 type VersionInfo struct {
 	Number int `json:"number"`
 }
 
-// NewClient creates a new Confluence client
+// NewClient 创建一个新的 Confluence 客户端
 func NewClient(config *config.Config) *Client {
 	return &Client{
 		config:     config,
@@ -40,7 +40,7 @@ func NewClient(config *config.Config) *Client {
 	}
 }
 
-// FindPageInParent finds a page by title in a parent page
+// FindPageInParent 在父页面中查找一个页面
 func (c *Client) FindPageInParent(title, parentPageID string) (*Page, error) {
 	endpoint := fmt.Sprintf("%s/rest/api/content/%s/child/page", c.config.Confluence.URL, parentPageID)
 
@@ -80,7 +80,7 @@ func (c *Client) FindPageInParent(title, parentPageID string) (*Page, error) {
 	return nil, nil
 }
 
-// GetPageByID gets a page by its ID
+// GetPageByID  按照ID获取页面
 func (c *Client) GetPageByID(pageID string) (*Page, error) {
 	endpoint := fmt.Sprintf("%s/rest/api/content/%s?expand=version", c.config.Confluence.URL, pageID)
 
@@ -110,7 +110,7 @@ func (c *Client) GetPageByID(pageID string) (*Page, error) {
 	return &page, nil
 }
 
-// UpdatePage updates an existing page
+// UpdatePage 更新一个存在的页面
 func (c *Client) UpdatePage(pageID, title, body, spaceKey string) error {
 	currentPage, err := c.GetPageByID(pageID)
 	if err != nil {
@@ -119,7 +119,6 @@ func (c *Client) UpdatePage(pageID, title, body, spaceKey string) error {
 
 	endpoint := fmt.Sprintf("%s/rest/api/content/%s", c.config.Confluence.URL, pageID)
 
-	// Prepare request body
 	bodyData := map[string]interface{}{
 		"id":    pageID,
 		"type":  "page",
@@ -166,11 +165,10 @@ func (c *Client) UpdatePage(pageID, title, body, spaceKey string) error {
 	return nil
 }
 
-// CreatePage creates a new page
+// CreatePage 创建一个新的页面
 func (c *Client) CreatePage(title, body, parentPageID string) (*Page, error) {
 	endpoint := fmt.Sprintf("%s/rest/api/content", c.config.Confluence.URL)
 
-	// Prepare request body
 	bodyData := map[string]interface{}{
 		"type":  "page",
 		"title": title,
@@ -222,14 +220,13 @@ func (c *Client) CreatePage(title, body, parentPageID string) (*Page, error) {
 	return &page, nil
 }
 
-// AttachFile uploads a file to a page
+// AttachFile  上传文件到页面
 func (c *Client) AttachFile(pageID, filename string, content []byte, contentType string) (map[string]interface{}, error) {
 	endpoint := fmt.Sprintf("%s/rest/api/content/%s/child/attachment", c.config.Confluence.URL, pageID)
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	// Add the file
 	part, err := writer.CreateFormFile("file", filename)
 	if err != nil {
 		return nil, err
@@ -239,16 +236,13 @@ func (c *Client) AttachFile(pageID, filename string, content []byte, contentType
 		return nil, err
 	}
 
-	// Add comment field
 	_ = writer.WriteField("comment", "Uploaded by markdown-sync-confluence")
 
-	// Close multipart writer to set the terminating boundary
 	err = writer.Close()
 	if err != nil {
 		return nil, err
 	}
 
-	// Build and execute the request
 	req, err := http.NewRequest("POST", endpoint, body)
 	if err != nil {
 		return nil, err
@@ -258,7 +252,6 @@ func (c *Client) AttachFile(pageID, filename string, content []byte, contentType
 	req.Header.Set("X-Atlassian-Token", "no-check")
 	req.SetBasicAuth(c.config.Confluence.Username, c.config.Confluence.Password)
 
-	// Check if file already exists, update it if it does
 	req.Header.Set("X-Atlassian-Token", "nocheck")
 
 	resp, err := c.httpClient.Do(req)
@@ -280,20 +273,17 @@ func (c *Client) AttachFile(pageID, filename string, content []byte, contentType
 	return result, nil
 }
 
-// NormalizeURL ensures that URLs have correct protocol and trailing slash
+// NormalizeURL 确保 URL 具有正确的协议和尾部斜杠
 func NormalizeURL(rawURL string) string {
-	// Add scheme if missing
 	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
 		rawURL = "https://" + rawURL
 	}
 
-	// Parse the URL
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
-		return rawURL // Return original if parsing fails
+		return rawURL 
 	}
 
-	// Ensure trailing slash
 	if !strings.HasSuffix(parsedURL.Path, "/") {
 		parsedURL.Path += "/"
 	}
@@ -301,7 +291,7 @@ func NormalizeURL(rawURL string) string {
 	return parsedURL.String()
 }
 
-// GetAttachments gets all attachments for a page
+// GetAttachments 获取一个页面的所有附件
 func (c *Client) GetAttachments(pageID string) ([]map[string]interface{}, error) {
 	endpoint := fmt.Sprintf("%s/rest/api/content/%s/child/attachment", c.config.Confluence.URL, pageID)
 
