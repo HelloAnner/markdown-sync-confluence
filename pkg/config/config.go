@@ -8,12 +8,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config represents the application configuration
+// Config 配置
 type Config struct {
 	Confluence ConfluenceConfig `yaml:"confluence"`
 }
 
-// ConfluenceConfig holds Confluence-specific configuration
+// ConfluenceConfig confluence 配置
 type ConfluenceConfig struct {
 	URL          string `yaml:"url"`
 	Username     string `yaml:"username"`
@@ -22,16 +22,16 @@ type ConfluenceConfig struct {
 	ParentPageID string `yaml:"parent_page_id,omitempty"`
 }
 
-// LoadConfig loads configuration with priority handling:
-// 1. Command-line arguments (highest priority)
-// 2. Environment variables
-// 3. Config file (lowest priority)
+// LoadConfig  按照优先级加载配置
+// 1. 最高优先级: 命令行参数
+// 2. 次高优先级: 环境变量
+// 3. 最低优先级: 配置文件
 func LoadConfig(configPath string, cliArgs map[string]string) (*Config, error) {
-	config := &Config{
+	config := &Config {
 		Confluence: ConfluenceConfig{},
 	}
 
-	// 1. Try to load from config file (lowest priority)
+	// 1. 尝试从配置文件加载 (最低优先级)
 	if configPath != "" {
 		err := loadFromFile(configPath, config)
 		if err != nil {
@@ -40,13 +40,13 @@ func LoadConfig(configPath string, cliArgs map[string]string) (*Config, error) {
 		}
 	}
 
-	// 2. Load from environment variables (medium priority)
+	// 2. 从环境变量加载 (次高优先级)
 	loadFromEnv(config)
 
-	// 3. Load from CLI arguments (highest priority)
+	// 3. 从命令行参数加载 (最高优先级)
 	loadFromCLI(config, cliArgs)
 
-	// Validate required configuration
+	// 验证必填配置
 	if err := validateConfig(config); err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func LoadConfig(configPath string, cliArgs map[string]string) (*Config, error) {
 	return config, nil
 }
 
-// loadFromFile loads configuration from YAML file
+// loadFromFile 从 YAML 文件加载配置
 func loadFromFile(configPath string, config *Config) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -64,7 +64,7 @@ func loadFromFile(configPath string, config *Config) error {
 	return yaml.Unmarshal(data, config)
 }
 
-// loadFromEnv loads configuration from environment variables
+// loadFromEnv 从环境变量加载配置
 func loadFromEnv(config *Config) {
 	if url := os.Getenv("KMS_URL"); url != "" {
 		config.Confluence.URL = url
@@ -83,7 +83,7 @@ func loadFromEnv(config *Config) {
 	}
 }
 
-// loadFromCLI loads configuration from command-line arguments
+// loadFromCLI 从命令行参数加载配置
 func loadFromCLI(config *Config, cliArgs map[string]string) {
 	if url := cliArgs["url"]; url != "" {
 		config.Confluence.URL = url
@@ -102,7 +102,7 @@ func loadFromCLI(config *Config, cliArgs map[string]string) {
 	}
 }
 
-// validateConfig validates the configuration
+// validateConfig 验证配置
 func validateConfig(config *Config) error {
 	var missingKeys []string
 
