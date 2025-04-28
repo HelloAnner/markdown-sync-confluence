@@ -42,39 +42,60 @@ func NewClient(config *config.Config) *Client {
 
 // FindPageInParent finds a page by title in a parent page
 func (c *Client) FindPageInParent(title, parentPageID string) (*Page, error) {
-	endpoint := fmt.Sprintf("%s/rest/api/content/%s/child/page", c.config.Confluence.URL, parentPageID)
+	start := 0
+	limit := 100 // 每页获取100个结果
+	
+	for {
+		endpoint := fmt.Sprintf("%s/rest/api/content/%s/child/page?limit=%d&start=%d", 
+			c.config.Confluence.URL, parentPageID, limit, start)
 
-	req, err := http.NewRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.SetBasicAuth(c.config.Confluence.Username, c.config.Confluence.Password)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("error finding page: %s - %s", resp.Status, string(body))
-	}
-
-	var result struct {
-		Results []Page `json:"results"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	for _, page := range result.Results {
-		if page.Title == title {
-			return &page, nil
+		req, err := http.NewRequest("GET", endpoint, nil)
+		if err != nil {
+			return nil, err
 		}
+
+		req.SetBasicAuth(c.config.Confluence.Username, c.config.Confluence.Password)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("error finding page: %s - %s", resp.Status, string(body))
+		}
+
+		var result struct {
+			Results []Page `json:"results"`
+			Size    int    `json:"size"`     // 当前页面结果数
+			Start   int    `json:"start"`    // 当前起始位置
+			Limit   int    `json:"limit"`    // 每页限制
+			Links   struct {
+				Next string `json:"next"`    // 下一页链接
+			} `json:"_links"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, err
+		}
+
+		// 在当前页面中查找目标页面
+		for _, page := range result.Results {
+			if page.Title == title {
+				return &page, nil
+			}
+		}
+
+		// 如果没有更多结果，退出循环
+		if len(result.Results) < limit || result.Links.Next == "" {
+			break
+		}
+
+		// 更新起始位置，继续获取下一页
+		start += limit
 	}
 
 	return nil, nil
