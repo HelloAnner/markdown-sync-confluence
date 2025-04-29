@@ -376,22 +376,12 @@ func (ch *ContentHandler) postProcessTables(content string) string {
 // 返回:
 //   - string: 处理后的内容，如果需要会添加目录宏
 func (ch *ContentHandler) addTOCMacro(content string) string {
-	// 检查内容是否至少有一个标题
-	if regexp.MustCompile(`<h[1-6]`).MatchString(content) {
-		// 如果尚未存在，添加TOC
-		if !strings.Contains(content, "ac:name=\"toc\"") {
-			tocMacro := `<ac:structured-macro ac:name="toc">` +
+		tocMacro := `<ac:structured-macro ac:name="toc">` +
 				`<ac:parameter ac:name="printable">true</ac:parameter>` +
 				`<ac:parameter ac:name="style">disc</ac:parameter>` +
 				`<ac:parameter ac:name="maxLevel">3</ac:parameter>` +
 				`<ac:parameter ac:name="minLevel">1</ac:parameter>` +
 				`</ac:structured-macro>`
-			
-			// 在第一个标题前添加TOC
-			firstHeadingIndex := regexp.MustCompile(`<h[1-6]`).FindStringIndex(content)[0]
-			content = content[:firstHeadingIndex] + tocMacro + "\n" + content[firstHeadingIndex:]
-		}
-	}
 	
-	return content
+	return tocMacro + "\n" + content
 } 
