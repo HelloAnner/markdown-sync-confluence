@@ -32,6 +32,46 @@ type VersionInfo struct {
 	Number int `json:"number"`
 }
 
+// SearchResult 表示搜索结果
+type SearchResult struct {
+	Results    []ContentResult `json:"results"`
+	Start      int            `json:"start"`
+	Limit      int            `json:"limit"`
+	Size       int            `json:"size"`
+	TotalSize  int            `json:"totalSize"`
+}
+
+// ContentResult 表示搜索返回的内容项
+type ContentResult struct {
+	ID      string    `json:"id"`
+	Type    string    `json:"type"`
+	Title   string    `json:"title"`
+	Excerpt string    `json:"excerpt"`
+	Space   SpaceInfo   `json:"space"`
+	Links   struct {
+		WebUI string `json:"webui"`
+	} `json:"_links"`
+	Version struct {
+		Number    int    `json:"number"`
+	} `json:"version"`
+}
+
+// SpaceInfo 表示空间信息
+type SpaceInfo struct {
+	ID    int64  `json:"id"`
+	Key   string `json:"key"`
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+}
+
+// SearchOptions 定义搜索选项
+type SearchOptions struct {
+	SpaceKey string // 限定搜索的空间
+	Type     string // 内容类型，如 "page", "blogpost" 等
+	Start    int    // 分页起始位置
+	Limit    int    // 每页结果数
+}
+
 // NewClient 创建一个新的 Confluence 客户端
 func NewClient(config *config.Config) *Client {
 	return &Client{
@@ -101,8 +141,8 @@ func (c *Client) FindPageInParent(title, parentPageID string) (*Page, error) {
 	return nil, nil
 }
 
-// GetPageByID  按照ID获取页面
-func (c *Client) GetPageByID(pageID string) (*Page, error) {
+// GetPageInfoByID  按照ID获取页面基本信息 (不包括内容)
+func (c *Client) GetPageInfoByID(pageID string) (*Page, error) {
 	endpoint := fmt.Sprintf("%s/rest/api/content/%s?expand=version", c.config.Confluence.URL, pageID)
 
 	req, err := http.NewRequest("GET", endpoint, nil)
@@ -131,9 +171,47 @@ func (c *Client) GetPageByID(pageID string) (*Page, error) {
 	return &page, nil
 }
 
+// GetPageContentByID 获取页面的 HTML 内容
+func (c *Client) GetPageContentByID(pageID string) (string, error) {
+	endpoint := fmt.Sprintf("%s/rest/api/content/%s?expand=body.storage", c.config.Confluence.URL, pageID)
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.SetBasicAuth(c.config.Confluence.Username, c.config.Confluence.Password)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("error getting page content: %s - %s", resp.Status, string(body))
+	}
+
+	var result struct {
+		Body struct {
+			Storage struct {
+				Value string `json:"value"`
+			} `json:"storage"`
+		} `json:"body"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("error decoding response: %w", err)
+	}
+
+	return result.Body.Storage.Value, nil
+}
+
 // UpdatePage 更新一个存在的页面
 func (c *Client) UpdatePage(pageID, title, body, spaceKey string) error {
-	currentPage, err := c.GetPageByID(pageID)
+	currentPage, err := c.GetPageInfoByID(pageID)
 	if err != nil {
 		return err
 	}
@@ -344,4 +422,63 @@ func (c *Client) GetAttachments(pageID string) ([]map[string]interface{}, error)
 	}
 
 	return result.Results, nil
+}
+
+// SearchPages 使用关键词搜索页面
+// 参数:
+//   - query: 搜索关键词
+//   - options: 搜索选项，包括空间、类型和分页参数
+// 返回:
+//   - *SearchResult: 搜索结果，包含页面ID和其他信息
+//   - error: 错误信息
+func (c *Client) SearchPages(query string, options *SearchOptions) (*SearchResult, error) {
+	if options == nil {
+		options = &SearchOptions{
+			Start: 0,
+			Limit: 25,
+		}
+	}
+
+	// 构建 CQL 查询
+	cql := fmt.Sprintf("text ~ \"%s\"", query)
+	if options.SpaceKey != "" {
+		cql += fmt.Sprintf(" AND space = \"%s\"", options.SpaceKey)
+	}
+	if options.Type != "" {
+		cql += fmt.Sprintf(" AND type = \"%s\"", options.Type)
+	}
+
+	// 构建请求 URL
+	endpoint := fmt.Sprintf("%s/rest/api/content/search?cql=%s&start=%d&limit=%d&expand=space,version,metadata",
+		c.config.Confluence.URL,
+		url.QueryEscape(cql),
+		options.Start,
+		options.Limit,
+	)
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating search request: %w", err)
+	}
+
+	req.SetBasicAuth(c.config.Confluence.Username, c.config.Confluence.Password)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error executing search request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("error searching pages: %s - %s", resp.Status, string(body))
+	}
+
+	var result SearchResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("error decoding search response: %w", err)
+	}
+
+	return &result, nil
 } 

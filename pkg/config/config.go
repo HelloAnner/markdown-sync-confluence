@@ -25,25 +25,15 @@ type ConfluenceConfig struct {
 // LoadConfig  按照优先级加载配置
 // 1. 最高优先级: 命令行参数
 // 2. 次高优先级: 环境变量
-// 3. 最低优先级: 配置文件
-func LoadConfig(configPath string, cliArgs map[string]string) (*Config, error) {
+func LoadConfig(cliArgs map[string]string) (*Config, error) {
 	config := &Config {
 		Confluence: ConfluenceConfig{},
 	}
 
-	// 1. 尝试从配置文件加载 (最低优先级)
-	if configPath != "" {
-		err := loadFromFile(configPath, config)
-		if err != nil {
-			fmt.Printf("⚠️ Warning: Unable to read config file %s: %s\n", configPath, err)
-			fmt.Println("Will try using environment variables...")
-		}
-	}
-
-	// 2. 从环境变量加载 (次高优先级)
+	// 1. 从环境变量加载 (次高优先级)
 	loadFromEnv(config)
 
-	// 3. 从命令行参数加载 (最高优先级)
+	// 2. 从命令行参数加载 (最高优先级)
 	loadFromCLI(config, cliArgs)
 
 	// 验证必填配置

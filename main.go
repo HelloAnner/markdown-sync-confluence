@@ -87,7 +87,7 @@ func main() {
 	}
 
 	// Load configuration with priority handling
-	cfg, err := config.LoadConfig(*configFlag, cliConfig)
+	cfg, err := config.LoadConfig( cliConfig)
 	if err != nil {
 		fmt.Printf("❌ Error: %s\n", err)
 		os.Exit(1)
