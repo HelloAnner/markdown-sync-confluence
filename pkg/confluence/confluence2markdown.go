@@ -20,50 +20,62 @@ func NewConverter(config *config.Config) *Converter {
 	return &Converter{config: config, confluenceClient: confluenceClient, contentHandler: contentHandler}
 }
 
-func (c *Converter) Download(searchWord string ) error {
+func (c *Converter) Download(searchWord string, limit int) error {
 
-	// 搜索
-	searchOptions := &SearchOptions{
-		SpaceKey: "DR",
-		Type:     "page",
-		Start:    0,
-		Limit:    200,
-	}
+	total := 0
 
-	searchResult, err := c.confluenceClient.SearchPages(searchWord, searchOptions)
-	if err != nil {
-		fmt.Printf("❌ Error: %s\n", err)
-		return err
-	}
+	for start := 0; ; start += 200 {
+		searchOptions := &SearchOptions{
+			SpaceKey: "DR",
+			Type:     "page",
+			Start:    start,
+			Limit:    200,
+		}
 
-	for _, page := range searchResult.Results {
-		pageContent, err := c.confluenceClient.GetPageContentByID(page.ID)
+		searchResult, err := c.confluenceClient.SearchPages(searchWord, searchOptions)
 		if err != nil {
 			fmt.Printf("❌ Error: %s\n", err)
 			return err
 		}
 
-		markdownContent, err := c.contentHandler.ConvertToMarkdown(pageContent)
-		if err != nil {
-			fmt.Printf("❌ Error: %s\n", err)
-			return err
+		for _, page := range searchResult.Results {
+			pageContent, err := c.confluenceClient.GetPageContentByID(page.ID)
+			if err != nil {
+				fmt.Printf("❌ Error: %s\n", err)
+				return err
+			}
+
+			markdownContent, err := c.contentHandler.ConvertToMarkdown(pageContent)
+			if err != nil {
+				fmt.Printf("❌ Error: %s\n", err)
+				return err
+			}
+
+			// 创建目录
+			dir := "docs"
+			if _, err := os.Stat(dir); os.IsNotExist(err) {
+				os.MkdirAll(dir, 0755)
+			}
+
+			if total >= limit {
+				break
+			}
+
+			// 保存到当前目录
+			// 文件名简单编码,去除/
+			fileName := strings.ReplaceAll(page.Title, "/", "_") + ".md"
+			err = os.WriteFile(dir+"/"+fileName, []byte(markdownContent), 0644)
+			if err != nil {
+				fmt.Printf("❌ Error: %s\n", err)
+				return err
+			}
+
+			total++
 		}
 
-		// 创建目录
-		dir := "docs"
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			os.MkdirAll(dir, 0755)
-		}
-
-		// 保存到当前目录
-		// 文件名简单编码,去除/
-		fileName := strings.ReplaceAll(page.Title, "/", "_") + ".md"
-		err = os.WriteFile(dir + "/" + fileName, []byte(markdownContent), 0644)
-		if err != nil {
-			fmt.Printf("❌ Error: %s\n", err)
-			return err
+		if total >= limit || searchResult.Size < 200 {
+			break
 		}
 	}
-
 	return nil
 }

@@ -394,7 +394,11 @@ func (h *ContentHandler) convertTaskLists(content string) string {
 	// 转换任务列表宏
 	re := regexp.MustCompile(`<ac:task-list>(?s)(.*?)</ac:task-list>`)
 	content = re.ReplaceAllStringFunc(content, func(match string) string {
-		taskListContent := re.FindStringSubmatch(match)[1]
+		matches := re.FindStringSubmatch(match)
+		if len(matches) < 2 {
+			return match
+		}
+		taskListContent := matches[1]
 		
 		// 转换单个任务项
 		reTask := regexp.MustCompile(`<ac:task>(?s)(.*?)</ac:task>`)
@@ -403,8 +407,16 @@ func (h *ContentHandler) convertTaskLists(content string) string {
 			reStatus := regexp.MustCompile(`<ac:task-status>(.*?)</ac:task-status>`)
 			reBody := regexp.MustCompile(`<ac:task-body>(.*?)</ac:task-body>`)
 			
-			status := reStatus.FindStringSubmatch(task)[1]
-			body := reBody.FindStringSubmatch(task)[1]
+			statusMatches := reStatus.FindStringSubmatch(task)
+			bodyMatches := reBody.FindStringSubmatch(task)
+			
+			// 如果没有找到匹配，返回原始内容
+			if len(statusMatches) < 2 || len(bodyMatches) < 2 {
+				return task
+			}
+			
+			status := statusMatches[1]
+			body := bodyMatches[1]
 			
 			// 清理任务内容中的HTML
 			body = h.cleanHTML(body)
