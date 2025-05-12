@@ -12,5 +12,5 @@ func TestDownload(t *testing.T) {
 	}
 	cfg, _ := config.LoadConfig(cliConfig)
 	converter := NewConverter(cfg)
-	converter.Download("定时调度" , 500)
+	converter.SearchAndDownloadToLocalFile("Swift" , 500)
 }

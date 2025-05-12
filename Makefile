@@ -27,7 +27,7 @@ PLATFORMS := darwin/amd64 darwin/arm64 \
 .PHONY: build all darwin linux windows clean help
 
 build:
-	@CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) .
+	@CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/web/main.go
 
 $(OUT_DIR):
 	@mkdir -p $(OUT_DIR)
@@ -45,7 +45,7 @@ $(PLATFORMS): %: $(OUT_DIR)
 	@echo ">> 编译 $(GOOS)/$(GOARCH)..."
 	@CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) \
 		$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" \
-		-o $(OUT_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)$(SUFFIX) .
+		-o $(OUT_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)$(SUFFIX) ./cmd/web/main.go
 
 # 平台组编译
 darwin: $(OUT_DIR) darwin/amd64 darwin/arm64

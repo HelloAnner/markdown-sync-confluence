@@ -20,7 +20,30 @@ func NewConverter(config *config.Config) *Converter {
 	return &Converter{config: config, confluenceClient: confluenceClient, contentHandler: contentHandler}
 }
 
-func (c *Converter) Download(searchWord string, limit int) error {
+func (c *Converter) GetFileName(pageID string) (string, error) {
+	pageInfo, err := c.confluenceClient.GetPageInfoByID(pageID)
+	if err != nil {
+		return "", err
+	}
+	return pageInfo.Title, nil
+}
+
+
+func (c *Converter) ToMarkdown(pageID string) (string, error) {
+	pageContent, err := c.confluenceClient.GetPageContentByID(pageID)
+	if err != nil {
+		return "", err
+	}
+
+	markdownContent, err := c.contentHandler.ConvertToMarkdown(pageContent)
+	if err != nil {
+		return "", err
+	}
+	return markdownContent, nil
+}
+
+
+func (c *Converter) SearchAndDownloadToLocalFile(searchWord string, limit int) error {
 
 	total := 0
 

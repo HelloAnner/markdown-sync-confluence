@@ -1,104 +1,41 @@
-# Markdown to Confluence Sync
+# KMS Markdown Converter
 
-A tool to convert and publish Markdown files to Confluence pages.
+一个用于将 KMS 页面转换为 Markdown 格式的工具。
 
-## Features
+## 使用 Docker 运行
 
-- Convert Markdown files to Confluence format
-- Automatically handle images (upload and reference)
-- Support for code highlighting
-- Support for Mermaid diagrams
-- Support for collapsible/folding sections
-- Support for task lists
-- Table of Contents generation
+### 方法 1：使用 docker-compose（推荐）
 
-## Installation
-
-### From Source
-
-```bash
-git clone https://github.com/HelloAnner/markdown-sync-confluence.git
-cd markdown-sync-confluence
-go build
-```
-
-## Usage
-
-### Basic Usage
-
-```bash
-# Using file name as the page title
-./markdown-sync-confluence test.md --url https://your-domain.atlassian.net --username your.email@domain.com --password your-api-token --space SPACEKEY --parent 123456
-
-# Specifying a custom page title
-./markdown-sync-confluence test.md --title "My Custom Title" --url https://your-domain.atlassian.net --username your.email@domain.com --password your-api-token --space SPACEKEY --parent 123456
-```
-
-### Configuration Options
-
-1. Command line arguments (highest priority):
+1. 确保已安装 Docker 和 docker-compose
+2. 在项目根目录下运行：
+   ```bash
+   docker-compose up -d
    ```
-   --url, -u        Confluence URL
-   --username       Confluence username/email
-   --password       Confluence API token
-   --space          Confluence space key
-   --parent, -p     Parent page ID
-   --title, -t      Page title (defaults to file name)
-   --config, -c     Path to config file
+3. 访问 http://localhost:8080
+
+### 方法 2：直接使用 Docker
+
+1. 构建镜像：
+   ```bash
+   docker build -t kms-markdown-converter .
    ```
 
-2. Environment variables:
-   ```
-   export KMS_URL=https://your-domain.atlassian.net
-   export KMS_USERNAME=your.email@domain.com
-   export KMS_PASSWORD=your-api-token
-   export KMS_SPACE=SPACEKEY
+2. 运行容器：
+   ```bash
+   docker run -d -p 8080:8080 kms-markdown-converter
    ```
 
-3. Configuration file (lowest priority):
-   Create a `config.yml` file with the following structure:
-   ```yaml
-   confluence:
-     url: 'https://your-domain.atlassian.net'
-     username: 'your.email@domain.com'
-     password: 'your-api-token'
-     space: 'SPACEKEY'
-     parent_page_id: '123456'
-   ```
+3. 访问 http://localhost:8080
 
-   Then run:
-   ```
-   ./markdown-sync-confluence test.md --config config.yml
-   ```
+## 开发环境
 
-## Special Markdown Features
+- Go 1.21+
+- Vue.js 3
+- Tailwind CSS
 
-### Mermaid Diagrams
+## 功能特性
 
-```
-​```mermaid
-graph TD
-    A[Start] --> B{Is it?}
-    B -->|Yes| C[OK]
-    B -->|No| D[End]
-​```
-```
-
-### Collapsible Sections
-
-```
----Title---
-Content here
----Title---
-```
-
-### Task Lists
-
-```
-- [ ] Incomplete task
-- [x] Completed task
-```
-
-## License
-
-MIT
+- KMS 页面转换为 Markdown
+- 在线预览和编辑
+- 文件下载
+- 用户认证
