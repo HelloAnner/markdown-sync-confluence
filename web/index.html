@@ -112,10 +112,23 @@
     <div id="app">
         <div class="page-container">
             <div class="header">
-                <h1 class="text-2xl font-medium text-center">KMS下载器</h1>
+                <h1 class="text-2xl font-medium text-center">KMS 同步工具</h1>
+                <div class="flex justify-center mt-4">
+                    <div class="flex bg-white bg-opacity-20 rounded-lg p-1">
+                        <button @click="activeTab = 'download'"
+                            :class="['px-4 py-2 rounded-md transition-all', activeTab === 'download' ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white hover:bg-opacity-20']">
+                            下载
+                        </button>
+                        <button @click="activeTab = 'upload'"
+                            :class="['px-4 py-2 rounded-md transition-all', activeTab === 'upload' ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white hover:bg-opacity-20']">
+                            上传
+                        </button>
+                    </div>
+                </div>
             </div>
 
-            <div class="content-box p-6">
+            <!-- 下载界面 -->
+            <div v-show="activeTab === 'download'" class="content-box p-6">
                 <div class="form-group">
                     <label class="form-label">KMS 页面链接</label>
                     <input type="text" v-model="confluenceUrl" @keyup.enter="viewContent" placeholder=""
@@ -148,7 +161,8 @@
                 </div>
 
                 <!-- Error Message -->
-                <div v-if="error" class="p-3 bg-red-50 border border-red-200 text-red-600 rounded-md text-sm mb-6">
+                <div v-if="error && activeTab === 'download'"
+                    class="p-3 bg-red-50 border border-red-200 text-red-600 rounded-md text-sm mb-6">
                     {{ error }}
                 </div>
 
@@ -158,6 +172,143 @@
                     <textarea v-model="content" class="markdown-editor w-full"></textarea>
                 </div>
             </div>
+<!-- 上传界面 -->
+<div v-show="activeTab === 'upload'" class="content-box p-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div class="form-group">
+            <label class="form-label">用户名</label>
+            <input type="text" v-model="username" placeholder="输入 KMS 用户名" class="form-input">
+        </div>
+        <div class="form-group">
+            <label class="form-label">密码</label>
+            <input type="password" v-model="password" placeholder="输入 KMS 密码" class="form-input">
+        </div>
+    </div>
+
+    <!-- 页面配置信息 -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div class="form-group">
+            <label class="form-label">页面标题</label>
+            <input type="text" v-model="uploadTitle" placeholder="输入页面标题" class="form-input" required>
+        </div>
+        <div class="form-group">
+            <label class="form-label">父页面链接</label>
+            <input type="text" v-model="parentPageUrl" @input="extractParentPageId"
+                placeholder="输入父页面链接 (如: https://kms.fineres.com/pages/viewpage.action?pageId=123456)"
+                class="form-input" required>
+            <div v-if="parentPageId" class="text-sm text-gray-500 mt-1">
+                解析出的页面ID: {{ parentPageId }}
+            </div>
+        </div>
+    </div>
+
+    <!-- 上传方式选择 -->
+    <div class="form-group">
+        <label class="form-label">上传方式</label>
+        <div class="flex space-x-4">
+            <label class="flex items-center">
+                <input type="radio" v-model="uploadMode" value="file" class="mr-2">
+                文件上传
+            </label>
+            <label class="flex items-center">
+                <input type="radio" v-model="uploadMode" value="text" class="mr-2">
+                文本输入
+            </label>
+        </div>
+    </div>
+
+    <!-- 文件上传模式 -->
+    <div v-if="uploadMode === 'file'">
+        <div class="form-group">
+            <label class="form-label">AI优化提示词 (可选)</label>
+            <div class="relative">
+                <textarea v-model="aiPrompt" placeholder="输入AI优化提示词，例如：请帮我优化文档结构，使其更加清晰易读..."
+                    class="form-input h-20 resize-none"></textarea>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">选择 Markdown 文件</label>
+            <input type="file" @change="handleFileSelect" accept=".md,.markdown" class="form-input">
+        </div>
+        <div v-if="selectedFile" class="form-group">
+            <label class="form-label">文件内容预览</label>
+            <div class="relative">
+                <textarea v-model="uploadContent" class="markdown-editor w-full"></textarea>
+                <!-- AI优化按钮 -->
+                <button v-if="uploadContent && aiPrompt" @click="optimizeContent" :disabled="isOptimizing"
+                    class="absolute top-3 right-3 p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-lg transition-all duration-200 disabled:opacity-50"
+                    title="AI优化文档内容">
+                    <svg v-if="!isOptimizing" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                    <svg v-else class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                        </path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 文本输入模式 -->
+    <div v-if="uploadMode === 'text'">
+        <div class="form-group">
+            <label class="form-label">AI优化提示词 (可选)</label>
+            <div class="relative">
+                <textarea v-model="aiPrompt" placeholder="输入AI优化提示词，例如：请帮我优化文档结构，使其更加清晰易读..."
+                    class="form-input h-20 resize-none"></textarea>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Markdown 内容</label>
+            <div class="relative">
+                <textarea v-model="uploadContent" placeholder="在此输入或粘贴 Markdown 内容..."
+                    class="markdown-editor w-full"></textarea>
+                <!-- AI优化按钮 -->
+                <button v-if="uploadContent && aiPrompt" @click="optimizeContent" :disabled="isOptimizing"
+                    class="absolute top-3 right-3 p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-lg transition-all duration-200 disabled:opacity-50"
+                    title="AI优化文档内容">
+                    <svg v-if="!isOptimizing" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                    <svg v-else class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                        </path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 上传按钮 -->
+    <div class="flex justify-center space-x-4 mb-6">
+        <button @click="uploadToConfluence"
+            :disabled="isUploading || !uploadContent || !uploadTitle || !parentPageId || !username || !password"
+            class="btn btn-primary">
+            <span v-if="!isUploading">上传到 Confluence</span>
+            <span v-else>上传中...</span>
+        </button>
+    </div>
+
+    <!-- Upload Error/Success Message -->
+    <div v-if="uploadError && activeTab === 'upload'"
+        class="p-3 bg-red-50 border border-red-200 text-red-600 rounded-md text-sm mb-6">
+        {{ uploadError }}
+    </div>
+    <div v-if="uploadSuccess && activeTab === 'upload'"
+        class="p-3 bg-green-50 border border-green-200 text-green-600 rounded-md text-sm mb-6">
+        {{ uploadSuccess }}
+        <a v-if="uploadPageUrl" :href="uploadPageUrl" target="_blank" class="underline ml-2">查看页面</a>
+    </div>
+</div>
         </div>
     </div>
 
@@ -167,13 +318,28 @@
         createApp({
             data() {
                 return {
+                    activeTab: 'download',
                     username: localStorage.getItem('kms_username') || '',
                     password: localStorage.getItem('kms_password') || '',
                     confluenceUrl: '',
                     content: '',
                     fileName: '',
                     isLoading: false,
-                    error: ''
+                    error: '',
+                    // 上传相关数据
+                    uploadMode: 'text',
+                    selectedFile: null,
+                    uploadContent: '',
+                    uploadTitle: '',
+                    parentPageUrl: localStorage.getItem('kms_parent_page_url') || '',
+                    parentPageId: '',
+                    isUploading: false,
+                    uploadError: '',
+                    uploadSuccess: '',
+                    uploadPageUrl: '',
+                    // AI优化相关
+                    aiPrompt: localStorage.getItem('kms_ai_prompt') || '请帮我优化文档结构，使其更加清晰易读，保持原有内容的完整性',
+                    isOptimizing: false
                 }
             },
             watch: {
@@ -182,7 +348,17 @@
                 },
                 password(newValue) {
                     localStorage.setItem('kms_password', newValue)
+                },
+                parentPageUrl(newValue) {
+                    localStorage.setItem('kms_parent_page_url', newValue)
+                },
+                aiPrompt(newValue) {
+                    localStorage.setItem('kms_ai_prompt', newValue)
                 }
+            },
+            mounted() {
+                // 页面加载时自动解析父页面链接
+                this.extractParentPageId()
             },
             methods: {
                 async makeRequest(url, options = {}) {
@@ -235,6 +411,116 @@
                     // 清理
                     window.URL.revokeObjectURL(url)
                     document.body.removeChild(a)
+                },
+                handleFileSelect(event) {
+                    const file = event.target.files[0]
+                    if (!file) return
+
+                    this.selectedFile = file
+                    this.uploadTitle = file.name.replace(/\.(md|markdown)$/i, '')
+
+                    const reader = new FileReader()
+                    reader.onload = (e) => {
+                        this.uploadContent = e.target.result
+                    }
+                    reader.readAsText(file)
+                },
+                async uploadToConfluence() {
+                    if (!this.uploadContent || !this.uploadTitle || !this.parentPageId || !this.username || !this.password) return
+
+                    this.isUploading = true
+                    this.uploadError = ''
+                    this.uploadSuccess = ''
+                    this.uploadPageUrl = ''
+
+                    try {
+                        const response = await this.makeRequest('/api/upload', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            data: {
+                                content: this.uploadContent,
+                                title: this.uploadTitle,
+                                parentPageId: this.parentPageId
+                            }
+                        })
+
+                        if (response.data.success) {
+                            this.uploadSuccess = response.data.message
+                            this.uploadPageUrl = response.data.pageUrl
+
+                            // 清理表单
+                            this.uploadContent = ''
+                            this.uploadTitle = ''
+                            this.selectedFile = null
+
+                            // 重置文件输入
+                            const fileInput = document.querySelector('input[type="file"]')
+                            if (fileInput) fileInput.value = ''
+                        } else {
+                            this.uploadError = response.data.message || '上传失败'
+                        }
+                    } catch (err) {
+                        this.uploadError = err.response?.data?.message || err.response?.data || '上传失败，请稍后重试。'
+                    } finally {
+                        this.isUploading = false
+                    }
+                },
+                extractParentPageId() {
+                    // 从链接中提取pageId
+                    if (!this.parentPageUrl) {
+                        this.parentPageId = ''
+                        return
+                    }
+
+                    const match = this.parentPageUrl.match(/pageId=(\d+)/)
+                    if (match && match[1]) {
+                        this.parentPageId = match[1]
+                    } else {
+                        this.parentPageId = ''
+                    }
+                },
+                async optimizeContent() {
+                    if (!this.uploadContent || !this.aiPrompt || !this.username || !this.password) return
+
+                    this.isOptimizing = true
+                    this.uploadError = ''
+
+                    try {
+                        const response = await this.makeRequest('/api/optimize', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            data: {
+                                content: this.uploadContent,
+                                prompt: this.aiPrompt
+                            }
+                        })
+
+                        if (response.data.success) {
+                            this.uploadContent = response.data.optimizedContent
+                            // 可以添加一个成功提示
+                            this.$nextTick(() => {
+                                // 简单的成功反馈
+                                const button = document.querySelector('button[title="AI优化文档内容"]')
+                                if (button) {
+                                    const originalTitle = button.title
+                                    button.title = '优化完成！'
+                                    setTimeout(() => {
+                                        button.title = originalTitle
+                                    }, 2000)
+                                }
+                            })
+                        } else {
+                            this.uploadError = response.data.message || 'AI优化失败'
+                        }
+                    } catch (err) {
+                        this.uploadError = err.response?.data?.message || err.response?.data || 'AI优化失败，请稍后重试。'
+                    } finally {
+                        this.isOptimizing = false
+                    }
                 }
             }
         }).mount('#app')

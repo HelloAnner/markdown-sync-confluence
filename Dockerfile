@@ -12,8 +12,8 @@ COPY . .
 ENV CGO_ENABLED=0
 ARG TARGETOS
 ARG TARGETARCH
-RUN cd cmd/download && GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o main
+RUN cd cmd/web && GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o main
 
 EXPOSE 8080
 
-CMD ["./cmd/download/main"]
+CMD ["./cmd/web/main"]
