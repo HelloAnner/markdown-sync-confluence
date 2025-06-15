@@ -64,7 +64,7 @@ jobs:
           GOARCH: ${{ matrix.arch }}
         run: |
           mkdir -p release
-          go build -ldflags="-s -w" -o release/${{ matrix.binary-name }} .
+          go build -ldflags="-s -w" -o release/${{ matrix.binary-name }} cmd/upload/main.go
 
       # 测试生成的执行文件
       - name: Test executable (non-Windows)

@@ -29,3 +29,10 @@ md2kms*
 
 .ruff_cache/
 
+kms2md*
+
+dist/
+
+release/
+
+build/

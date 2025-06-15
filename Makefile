@@ -20,14 +20,14 @@ OUT_DIR := dist
 
 # 目标平台定义
 PLATFORMS := darwin/amd64 darwin/arm64 \
-	linux/amd64 linux/arm64 \
+	linux/amd64 linux/arm64 \w
 	windows/amd64
 
 # 默认目标
 .PHONY: build all darwin linux windows clean help
 
 build:
-	@CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/web/main.go
+	@CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) .
 
 $(OUT_DIR):
 	@mkdir -p $(OUT_DIR)
@@ -45,7 +45,7 @@ $(PLATFORMS): %: $(OUT_DIR)
 	@echo ">> 编译 $(GOOS)/$(GOARCH)..."
 	@CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) \
 		$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" \
-		-o $(OUT_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)$(SUFFIX) ./cmd/web/main.go
+		-o $(OUT_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)$(SUFFIX) .
 
 # 平台组编译
 darwin: $(OUT_DIR) darwin/amd64 darwin/arm64
