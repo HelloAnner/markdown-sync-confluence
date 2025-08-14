@@ -1,18 +1,9 @@
-FROM golang:1.24-alpine
+FROM golang:1.24.2-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache git build-base
-
-COPY go.mod go.sum ./
-RUN go mod download
-
 COPY . .
-
-ENV CGO_ENABLED=0
-ARG TARGETOS
-ARG TARGETARCH
-RUN cd cmd/web && GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o main
+RUN cd cmd/web && go build -o main
 
 EXPOSE 8080
 
