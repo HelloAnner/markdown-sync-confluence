@@ -1,20 +1,20 @@
 # 简化版 Makefile
 
-.PHONY: build docker clean
+.PHONY: build run clean help
 
 build:
 	cd cmd/web && go build -o main
 
-docker:
-	docker-compose up --build -d
+run:
+	./run.sh
 
 clean:
-	rm -f cmd/web/main
+	./clean.sh
 
 help:
 	@echo "用法: make [目标]"
 	@echo ""
 	@echo "目标:"
-	@echo "  build   编译项目"
-	@echo "  docker  构建并启动 Docker 容器"
-	@echo "  clean   清理编译产物"
+	@echo "  build   编译 Web 服务"
+	@echo "  run     通过脚本启动/构建"
+	@echo "  clean   清理所有日志与构建产物"
