@@ -15,23 +15,56 @@ func NewPreprocessor() *Preprocessor {
 
 // Process applies all preprocessing steps to the markdown content
 func (p *Preprocessor) Process(content string) string {
-	content = p.StripFrontMatter(content)
-	content = p.PreprocessURLs(content)
-	return content
+    content = p.StripFrontMatter(content)
+    content = p.PreprocessURLs(content)
+    return content
 }
 
 // StripFrontMatter removes YAML front matter from Markdown content
 func (p *Preprocessor) StripFrontMatter(content string) string {
-	// Match YAML front matter pattern
-	pattern := regexp.MustCompile(`^---\s*\n(.*?)\n---\s*\n`)
-	
-	if strings.HasPrefix(content, "---") {
-		if match := pattern.FindStringSubmatch(content); len(match) > 0 {
-			return content[len(match[0]):]
-		}
-	}
-	
-	return content
+    // Normalize line endings for reliable processing
+    normalized := strings.ReplaceAll(content, "\r\n", "\n")
+    // Remove leading BOM if present
+    if strings.HasPrefix(normalized, "\uFEFF") {
+        normalized = strings.TrimPrefix(normalized, "\uFEFF")
+    }
+
+    // Allow optional leading blank lines before frontmatter
+    lines := strings.Split(normalized, "\n")
+    start := 0
+    for start < len(lines) && strings.TrimSpace(lines[start]) == "" {
+        start++
+    }
+
+    // Frontmatter must start with a line that is exactly '---'
+    if start < len(lines) && strings.TrimSpace(lines[start]) == "---" {
+        // Find the closing '---' or '...' line
+        end := start + 1
+        for end < len(lines) {
+            trimmed := strings.TrimSpace(lines[end])
+            if trimmed == "---" || trimmed == "..." {
+                break
+            }
+            end++
+        }
+
+        if end < len(lines) { // Found a terminator
+            // Skip the closing line
+            next := end + 1
+            // Optionally skip a single blank line after frontmatter
+            if next < len(lines) && strings.TrimSpace(lines[next]) == "" {
+                next++
+            }
+            result := strings.Join(lines[next:], "\n")
+            // Keep original line endings if they were CRLF in the input
+            if strings.Contains(content, "\r\n") {
+                return strings.ReplaceAll(result, "\n", "\r\n")
+            }
+            return result
+        }
+    }
+
+    return content
 }
 
 // PreprocessURLs encodes special characters in URLs
