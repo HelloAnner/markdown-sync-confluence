@@ -7,25 +7,6 @@ BIN_DIR="$ROOT_DIR/bin"
 LOG_DIR="$ROOT_DIR/logs"
 DIST_DIR="$ROOT_DIR/dist/cli"
 CLI_BINARY_NAME="md2kms"
-WEB_SERVER_PID=""
-WEB_TAIL_PID=""
-
-cleanup_web_service() {
-	if [[ -n "${WEB_TAIL_PID:-}" ]]; then
-		kill "${WEB_TAIL_PID}" >/dev/null 2>&1 || true
-		wait "${WEB_TAIL_PID}" 2>/dev/null || true
-		WEB_TAIL_PID=""
-	fi
-	if [[ -n "${WEB_SERVER_PID:-}" ]]; then
-		if kill -0 "${WEB_SERVER_PID}" >/dev/null 2>&1; then
-			echo ""
-			echo "🛑 正在停止 Web 服务 (PID: ${WEB_SERVER_PID})"
-			kill "${WEB_SERVER_PID}" >/dev/null 2>&1 || true
-		fi
-		wait "${WEB_SERVER_PID}" 2>/dev/null || true
-		WEB_SERVER_PID=""
-	fi
-}
 
 require_go() {
 	if ! command -v go >/dev/null 2>&1; then
@@ -36,6 +17,38 @@ require_go() {
 
 prepare_directories() {
 	mkdir -p "$BIN_DIR" "$LOG_DIR"
+}
+
+get_lan_ips() {
+	local ips=()
+
+	if command -v ip >/dev/null 2>&1; then
+		while IFS= read -r ip_addr; do
+			if [[ -n "$ip_addr" ]]; then
+				ips+=("$ip_addr")
+			fi
+		done < <(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d'/' -f1)
+	fi
+
+	if (( ${#ips[@]} == 0 )) && command -v ifconfig >/dev/null 2>&1; then
+		while IFS= read -r ip_addr; do
+			if [[ -n "$ip_addr" ]]; then
+				ips+=("$ip_addr")
+			fi
+		done < <(ifconfig 2>/dev/null | awk '/inet / && $2 !~ /^127\./ {print $2}')
+	fi
+
+	if (( ${#ips[@]} == 0 )) && command -v hostname >/dev/null 2>&1; then
+		local host_ips
+		host_ips=$(hostname -I 2>/dev/null || true)
+		for ip_addr in $host_ips; do
+			if [[ -n "$ip_addr" && "$ip_addr" != "127.0.0.1" ]]; then
+				ips+=("$ip_addr")
+			fi
+		done
+	fi
+
+	printf '%s\n' "${ips[@]}"
 }
 
 start_web_service() {
@@ -62,39 +75,38 @@ start_web_service() {
 	touch "$log_file"
 	: >"$log_file"
 
-	echo "🚀 即将启动 Web 服务 (端口: $port)"
-	echo "🌐 访问地址: $url"
+	echo "🚀 正在后台启动 Web 服务 (端口: $port)"
+	echo "🌐 本地访问地址: $url"
 	echo "📝 日志写入: $log_file"
-	echo "📣 Ctrl+C 停止服务并退出脚本"
 
-	"$BIN_DIR/kms-web" --port "$port" >>"$log_file" 2>&1 &
-	WEB_SERVER_PID=$!
-
-	trap cleanup_web_service EXIT INT TERM
+	nohup "$BIN_DIR/kms-web" --port "$port" >>"$log_file" 2>&1 </dev/null &
+	local web_pid=$!
 
 	sleep 1
-	if ! kill -0 "$WEB_SERVER_PID" >/dev/null 2>&1; then
+	if ! kill -0 "$web_pid" >/dev/null 2>&1; then
 		echo "❌ Web 服务启动失败，请检查日志 $log_file"
 		exit 1
 	fi
 
-	tail -n 20 -f "$log_file" &
-	WEB_TAIL_PID=$!
+	echo "✅ Web 服务已启动 (PID: $web_pid)"
 
-	set +e
-	wait "$WEB_SERVER_PID"
-	local server_status=$?
-	set -e
+	local lan_ips=()
+	while IFS= read -r addr; do
+		if [[ -n "$addr" ]]; then
+			lan_ips+=("$addr")
+		fi
+	done < <(get_lan_ips)
 
-	trap - EXIT INT TERM
-	cleanup_web_service
-
-	if (( server_status == 0 )); then
-		echo "✅ Web 服务正常退出"
+	if (( ${#lan_ips[@]} > 0 )); then
+		echo "📡 局域网访问地址:"
+		for addr in "${lan_ips[@]}"; do
+			echo "  - http://$addr:$port"
+		done
 	else
-		echo "❌ Web 服务异常退出 (状态码: $server_status)"
-		return $server_status
+		echo "⚠️ 未检测到局域网 IP，可使用本地地址访问"
 	fi
+
+	echo "ℹ️ 服务将持续运行，若需停止请执行: kill $web_pid"
 }
 
 package_cli() {
@@ -141,7 +153,7 @@ show_menu() {
 	echo "======================================"
 	echo " KMS Markdown Converter 启动助手"
 	echo "======================================"
-	echo "1) 启动 Web 服务 (实时日志)"
+	echo "1) 启动 Web 服务 (后台运行)"
 	echo "2) 打包 CLI (macOS/Linux 多架构)"
 	echo "q) 退出"
 	echo "======================================"

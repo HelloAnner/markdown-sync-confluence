@@ -1,13 +1,14 @@
 package markdown
 
 import (
-	"regexp"
-	"strings"
+    "regexp"
+    "strconv"
+    "strings"
 
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/parser"
-	"github.com/yuin/goldmark/renderer/html"
+    "github.com/yuin/goldmark"
+    "github.com/yuin/goldmark/extension"
+    "github.com/yuin/goldmark/parser"
+    "github.com/yuin/goldmark/renderer/html"
 )
 
 // ContentHandler 处理Markdown内容并将其转换为Confluence格式
@@ -67,8 +68,9 @@ func (ch *ContentHandler) ConvertToConfluence(content string) (string, error) {
 	result = ch.postProcessLinks(result)       // 处理链接
 	result = ch.postProcessMermaid(result)     // 处理Mermaid图表
 	result = ch.postProcessFolding(result)     // 处理折叠块
-	result = ch.postProcessTables(result)      // 处理表格
-	result = ch.addTOCMacro(result)            // 添加目录宏
+    result = ch.postProcessTables(result)      // 处理表格
+    result = ch.postProcessMarkHighlights(result) // 处理 <mark> 高亮
+    result = ch.addTOCMacro(result)            // 添加目录宏
 
 	return result, nil
 }
@@ -383,5 +385,186 @@ func (ch *ContentHandler) addTOCMacro(content string) string {
 				`<ac:parameter ac:name="minLevel">1</ac:parameter>` +
 				`</ac:structured-macro>`
 	
-	return tocMacro + "\n" + content
-} 
+    return tocMacro + "\n" + content
+}
+
+// postProcessMarkHighlights 将 HTML <mark style="background: ...">text</mark>
+// 转为 Confluence 友好的 <span style="background-color: ...; color: ...">text</span>
+// 颜色解析失败时默认使用红色（#FFEBE6 背景），并根据调色板选择合适文字色
+func (ch *ContentHandler) postProcessMarkHighlights(content string) string {
+    // 匹配 <mark ...>...</mark>（大小写不敏感）
+    reMark := regexp.MustCompile(`(?i)<mark([^>]*)>([\s\S]*?)</mark>`)
+    return reMark.ReplaceAllStringFunc(content, func(match string) string {
+        sub := reMark.FindStringSubmatch(match)
+        if len(sub) < 3 {
+            return match
+        }
+        attrs := sub[1]
+        inner := sub[2]
+
+        // 提取 style 属性（分别处理单双引号，RE2 无反向引用）
+        styleVal := ""
+        if m := regexp.MustCompile(`(?i)style\s*=\s*"([^"]*)"`).FindStringSubmatch(attrs); len(m) >= 2 {
+            styleVal = m[1]
+        } else if m := regexp.MustCompile(`(?i)style\s*=\s*'([^']*)'`).FindStringSubmatch(attrs); len(m) >= 2 {
+            styleVal = m[1]
+        }
+
+        // 从 style 中提取 background/background-color（大小写不敏感）
+        reBg := regexp.MustCompile(`(?i)background(?:-color)?\s*:\s*([^;]+)`) // 捕获到分号为止
+        bgRaw := ""
+        if styleVal != "" {
+            if m := reBg.FindStringSubmatch(styleVal); len(m) >= 2 {
+                bgRaw = strings.TrimSpace(m[1])
+            }
+        }
+
+        // 解析颜色
+        r, g, b, ok := parseColorToRGB(bgRaw)
+        if !ok {
+            // 默认红色高亮（subtle red）
+            r, g, b = 255, 235, 230 // #FFEBE6
+        }
+
+        // 映射到 Confluence 浅色高亮与文字色
+        bgHex, textHex := mapToConfluenceHighlight(r, g, b)
+
+        // 用 span 替换 mark
+        return `<span style="background-color: ` + bgHex + `; color: ` + textHex + `;">` + inner + `</span>`
+    })
+}
+
+// parseColorToRGB 支持 #RGB、#RRGGBB、#RRGGBBAA、rgb()/rgba()
+func parseColorToRGB(s string) (int, int, int, bool) {
+    if s == "" {
+        return 0, 0, 0, false
+    }
+    s = strings.TrimSpace(strings.ToLower(s))
+
+    // 去掉可能的 !important
+    if i := strings.Index(s, "!important"); i >= 0 {
+        s = strings.TrimSpace(s[:i])
+    }
+
+    // 十六进制
+    if strings.HasPrefix(s, "#") {
+        hex := strings.TrimPrefix(s, "#")
+        if len(hex) == 8 { // RRGGBBAA -> 忽略 alpha
+            hex = hex[:6]
+        } else if len(hex) == 4 { // RGBA -> 展开前3位并忽略 alpha
+            hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+        } else if len(hex) == 3 { // RGB -> 展开
+            hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+        } else if len(hex) != 6 {
+            return 0, 0, 0, false
+        }
+        r := mustHexToByte(hex[0:2])
+        g := mustHexToByte(hex[2:4])
+        b := mustHexToByte(hex[4:6])
+        return int(r), int(g), int(b), true
+    }
+
+    // rgb()/rgba()
+    if strings.HasPrefix(s, "rgb(") || strings.HasPrefix(s, "rgba(") {
+        l := strings.IndexByte(s, '(')
+        rpar := strings.LastIndexByte(s, ')')
+        if l < 0 || rpar <= l {
+            return 0, 0, 0, false
+        }
+        parts := strings.Split(s[l+1:rpar], ",")
+        if len(parts) < 3 {
+            return 0, 0, 0, false
+        }
+        r := parseIntClamp(parts[0])
+        g := parseIntClamp(parts[1])
+        b := parseIntClamp(parts[2])
+        return r, g, b, true
+    }
+
+    return 0, 0, 0, false
+}
+
+func parseIntClamp(s string) int {
+    s = strings.TrimSpace(s)
+    // 百分比形式，如 100%
+    if strings.HasSuffix(s, "%") {
+        sv := strings.TrimSpace(strings.TrimSuffix(s, "%"))
+        if f, err := strconv.ParseFloat(sv, 64); err == nil {
+            if f < 0 {
+                f = 0
+            }
+            if f > 100 {
+                f = 100
+            }
+            v := int(f*255.0/100.0 + 0.5)
+            if v < 0 {
+                return 0
+            }
+            if v > 255 {
+                return 255
+            }
+            return v
+        }
+        return 0
+    }
+    if v, err := strconv.Atoi(s); err == nil {
+        if v < 0 {
+            return 0
+        }
+        if v > 255 {
+            return 255
+        }
+        return v
+    }
+    return 0
+}
+
+func mustHexToByte(hs string) byte {
+    if v, err := strconv.ParseUint(hs, 16, 8); err == nil {
+        return byte(v)
+    }
+    return 0
+}
+
+// mapToConfluenceHighlight 将 RGB 映射到 Confluence 常见浅色高亮，返回 (背景HEX, 文字HEX)
+func mapToConfluenceHighlight(r, g, b int) (string, string) {
+    type colorPair struct {
+        bg   [3]int
+        txt  [3]int
+        bgHx string
+        txHx string
+    }
+
+    palette := []colorPair{
+        // Yellow
+        {bg: [3]int{255, 250, 230}, txt: [3]int{23, 43, 77}, bgHx: "#FFFAE6", txHx: "#172B4D"},
+        // Blue
+        {bg: [3]int{222, 235, 255}, txt: [3]int{7, 71, 166}, bgHx: "#DEEBFF", txHx: "#0747A6"},
+        // Green
+        {bg: [3]int{227, 252, 239}, txt: [3]int{0, 102, 68}, bgHx: "#E3FCEF", txHx: "#006644"},
+        // Red（默认失败回退色）
+        {bg: [3]int{255, 235, 230}, txt: [3]int{191, 38, 0}, bgHx: "#FFEBE6", txHx: "#BF2600"},
+        // Purple
+        {bg: [3]int{234, 230, 255}, txt: [3]int{82, 67, 170}, bgHx: "#EAE6FF", txHx: "#5243AA"},
+        // Teal
+        {bg: [3]int{230, 252, 255}, txt: [3]int{7, 71, 166}, bgHx: "#E6FCFF", txHx: "#0747A6"},
+        // Gray
+        {bg: [3]int{244, 245, 247}, txt: [3]int{66, 82, 110}, bgHx: "#F4F5F7", txHx: "#42526E"},
+        // Orange（接近示例 #FFB86C 的暖色）
+        {bg: [3]int{255, 216, 181}, txt: [3]int{143, 63, 14}, bgHx: "#FFD8B5", txHx: "#8F3F0E"},
+    }
+
+    bestIdx := 0
+    bestDist := 1<<31 - 1
+    for i, p := range palette {
+        dr := r - p.bg[0]
+        dg := g - p.bg[1]
+        db := b - p.bg[2]
+        dist := dr*dr + dg*dg + db*db
+        if dist < bestDist {
+            bestDist = dist
+            bestIdx = i
+        }
+    }
+    return palette[bestIdx].bgHx, palette[bestIdx].txHx
+}
