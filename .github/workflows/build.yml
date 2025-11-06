@@ -1,97 +1,128 @@
-name: Build Executables
+name: Build and Release CLI
 
 on:
   push:
-    tags:
-      - 'v*'
     branches:
       - main
   pull_request:
     branches:
       - main
 
+env:
+  CLI_BINARY_NAME: md2kms
+  DIST_DIR: dist/cli
+  RELEASE_TAG: nightly
+  RELEASE_NAME: Nightly Build
+
 jobs:
   build:
-    name: Build on ${{ matrix.os }} (${{ matrix.arch }})
-    runs-on: ${{ matrix.os }}
-    continue-on-error: true  # Allow individual platform builds to fail
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # macOS builds
-          - os: macos-latest
-            arch: amd64
-            binary-name: md2kms-darwin-amd64
-          - os: macos-latest
-            arch: arm64
-            binary-name: md2kms-darwin-arm64
-          
-          # Linux builds
-          - os: ubuntu-latest
-            arch: amd64
-            binary-name: md2kms-linux-amd64
-          - os: ubuntu-latest
-            arch: arm64
-            binary-name: md2kms-linux-arm64
-          
-          # Windows build
-          - os: windows-latest
-            arch: amd64
-            binary-name: md2kms-windows-amd64.exe
-
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 获取完整历史以便正确生成版本号
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.21'
+          go-version: '1.24'
           cache: true
 
-      # 设置特殊的交叉编译环境
-      - name: Set up cross-compilation for ARM64
-        if: matrix.arch == 'arm64'
+      - name: Build CLI packages
         run: |
-          echo "CGO_ENABLED=0" >> $GITHUB_ENV
+          set -euxo pipefail
 
-      # 编译执行文件
-      - name: Build with Go
-        env:
-          GOOS: ${{ matrix.os == 'windows-latest' && 'windows' || matrix.os == 'macos-latest' && 'darwin' || 'linux' }}
-          GOARCH: ${{ matrix.arch }}
-        run: |
-          mkdir -p release
-          go build -ldflags="-s -w" -o release/${{ matrix.binary-name }} cmd/upload/main.go
+          rm -rf "${DIST_DIR}"
+          mkdir -p "${DIST_DIR}"
 
-      # 测试生成的执行文件
-      - name: Test executable (non-Windows)
-        if: matrix.os != 'windows-latest'
-        run: |
-          chmod +x release/${{ matrix.binary-name }}
-          release/${{ matrix.binary-name }} --help || echo "Test failed but continuing..."
+          targets=(
+            "darwin amd64"
+            "darwin arm64"
+            "linux amd64"
+            "linux arm64"
+          )
 
-      - name: Test executable (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          release/${{ matrix.binary-name }} --help || echo "Test failed but continuing..."
+          for target in "${targets[@]}"; do
+            read -r os arch <<<"${target}"
+            artifact_name="${CLI_BINARY_NAME}-${os}-${arch}"
+            build_dir="${DIST_DIR}/${artifact_name}"
 
-      - name: Upload artifact
+            mkdir -p "${build_dir}"
+
+            echo "Building ${artifact_name} ..."
+            GOOS="${os}" GOARCH="${arch}" CGO_ENABLED=0 go build -o "${build_dir}/${CLI_BINARY_NAME}" ./cmd/command
+
+            tar -czf "${DIST_DIR}/${artifact_name}.tar.gz" -C "${build_dir}" "${CLI_BINARY_NAME}"
+            rm -rf "${build_dir}"
+          done
+
+          ls -R "${DIST_DIR}"
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.binary-name }}
-          path: release/${{ matrix.binary-name }}
+          name: cli-packages
+          path: ${{ env.DIST_DIR }}/*.tar.gz
 
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Delete existing nightly release and tag
+        if: github.event_name == 'push'
+        uses: actions/github-script@v7
         with:
-          files: release/${{ matrix.binary-name }}
+          github-token: ${{ secrets.AC }}
+          script: |
+            const tagName = process.env.RELEASE_TAG
+            const { owner, repo } = context.repo
+
+            try {
+              const release = await github.rest.repos.getReleaseByTag({ owner, repo, tag: tagName })
+              await github.rest.repos.deleteRelease({ owner, repo, release_id: release.data.id })
+              core.info(`Deleted release for tag ${tagName}`)
+            } catch (error) {
+              if (error.status === 404) {
+                core.info(`No existing release for tag ${tagName}`)
+              } else {
+                throw error
+              }
+            }
+
+            try {
+              await github.rest.git.deleteRef({ owner, repo, ref: `tags/${tagName}` })
+              core.info(`Deleted tag ${tagName}`)
+            } catch (error) {
+              if (error.status === 422 || error.status === 404) {
+                core.info(`Tag ${tagName} did not exist`)
+              } else {
+                throw error
+              }
+            }
+
+      - name: Update nightly tag
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "${RELEASE_TAG}" "$GITHUB_SHA"
+          git push origin "${RELEASE_TAG}" --force
+
+      - name: Publish nightly release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            Nightly build for commit ${{ github.sha }} on branch ${{ github.ref_name }}.
+          files: |
+            ${{ env.DIST_DIR }}/${{ env.CLI_BINARY_NAME }}-darwin-amd64.tar.gz
+            ${{ env.DIST_DIR }}/${{ env.CLI_BINARY_NAME }}-darwin-arm64.tar.gz
+            ${{ env.DIST_DIR }}/${{ env.CLI_BINARY_NAME }}-linux-amd64.tar.gz
+            ${{ env.DIST_DIR }}/${{ env.CLI_BINARY_NAME }}-linux-arm64.tar.gz
           draft: false
           prerelease: false
-          generate_release_notes: true
           fail_on_unmatched_files: true
         env:
-          GITHUB_TOKEN: ${{ secrets.AC }} 
+          GITHUB_TOKEN: ${{ secrets.AC }}
