@@ -43,6 +43,7 @@ jobs:
             "darwin arm64"
             "linux amd64"
             "linux arm64"
+            "windows amd64"
           )
 
           for target in "${targets[@]}"; do
@@ -52,10 +53,26 @@ jobs:
 
             mkdir -p "${build_dir}"
 
-            echo "Building ${artifact_name} ..."
-            GOOS="${os}" GOARCH="${arch}" CGO_ENABLED=0 go build -o "${build_dir}/${CLI_BINARY_NAME}" ./cmd/command
+            binary_extension=""
+            archive_extension="tar.gz"
+            archive_path="${DIST_DIR}/${artifact_name}.${archive_extension}"
 
-            tar -czf "${DIST_DIR}/${artifact_name}.tar.gz" -C "${build_dir}" "${CLI_BINARY_NAME}"
+            if [[ "${os}" == "windows" ]]; then
+              binary_extension=".exe"
+              archive_extension="zip"
+              archive_path="${DIST_DIR}/${artifact_name}.${archive_extension}"
+            fi
+
+            echo "Building ${artifact_name} ..."
+            output_binary="${CLI_BINARY_NAME}${binary_extension}"
+            GOOS="${os}" GOARCH="${arch}" CGO_ENABLED=0 go build -o "${build_dir}/${output_binary}" ./cmd/command
+
+            if [[ "${os}" == "windows" ]]; then
+              (cd "${build_dir}" && zip -q "${archive_path}" "${output_binary}")
+            else
+              tar -czf "${archive_path}" -C "${build_dir}" "${output_binary}"
+            fi
+
             rm -rf "${build_dir}"
           done
 
@@ -65,7 +82,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cli-packages
-          path: ${{ env.DIST_DIR }}/*.tar.gz
+          path: ${{ env.DIST_DIR }}/*
 
       - name: Delete existing nightly release and tag
         if: github.event_name == 'push'
@@ -121,6 +138,7 @@ jobs:
             ${{ env.DIST_DIR }}/${{ env.CLI_BINARY_NAME }}-darwin-arm64.tar.gz
             ${{ env.DIST_DIR }}/${{ env.CLI_BINARY_NAME }}-linux-amd64.tar.gz
             ${{ env.DIST_DIR }}/${{ env.CLI_BINARY_NAME }}-linux-arm64.tar.gz
+            ${{ env.DIST_DIR }}/${{ env.CLI_BINARY_NAME }}-windows-amd64.zip
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
